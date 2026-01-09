@@ -12,7 +12,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
     }
 
-    console.log(`[process-document] Processing file: ${file.name}, type: ${file.type}, size: ${file.size} bytes`);
+    console.log(
+      `[process-document] Processing file: ${file.name}, type: ${file.type}, size: ${file.size} bytes`
+    );
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const fileType = file.type;
@@ -21,30 +23,46 @@ export async function POST(request: NextRequest) {
     if (fileType === "application/pdf") {
       // Extract text from PDF using pdf-parse v1
       try {
-        console.log(`[process-document] Starting PDF extraction for: ${file.name}`);
+        console.log(
+          `[process-document] Starting PDF extraction for: ${file.name}`
+        );
         console.log(`[process-document] Buffer size: ${buffer.length} bytes`);
-        
+
         const result = await pdfParse(buffer);
-        
-        console.log(`[process-document] PDF parsed - pages: ${result.numpages || 0}`);
-        
+
+        console.log(
+          `[process-document] PDF parsed - pages: ${result.numpages || 0}`
+        );
+
         extractedText = result.text || "";
-        
-        console.log(`[process-document] Text extracted: ${extractedText.length} characters`);
-        
+
+        console.log(
+          `[process-document] Text extracted: ${extractedText.length} characters`
+        );
+
         if (!extractedText || extractedText.trim().length === 0) {
-          console.warn(`[process-document] No text extracted from PDF: ${file.name}`);
-          extractedText = "[PDF content could not be extracted. The PDF may be scanned/image-based or protected.]";
+          console.warn(
+            `[process-document] No text extracted from PDF: ${file.name}`
+          );
+          extractedText =
+            "[PDF content could not be extracted. The PDF may be scanned/image-based or protected.]";
         } else {
-          console.log(`[process-document] Successfully extracted ${extractedText.length} characters from PDF`);
+          console.log(
+            `[process-document] Successfully extracted ${extractedText.length} characters from PDF`
+          );
         }
       } catch (error) {
         console.error("[process-document] PDF parsing error:", error);
-        console.error("[process-document] Error details:", error instanceof Error ? error.message : String(error));
-        extractedText = "[Failed to extract PDF content. Please try a different PDF or convert to text.]";
+        console.error(
+          "[process-document] Error details:",
+          error instanceof Error ? error.message : String(error)
+        );
+        extractedText =
+          "[Failed to extract PDF content. Please try a different PDF or convert to text.]";
       }
     } else if (
-      fileType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+      fileType ===
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
       fileType === "application/msword"
     ) {
       // Extract text from DOCX
@@ -75,7 +93,8 @@ export async function POST(request: NextRequest) {
     // Truncate if too long (to prevent token limits)
     const MAX_LENGTH = 50000;
     if (extractedText.length > MAX_LENGTH) {
-      extractedText = extractedText.slice(0, MAX_LENGTH) + "\n\n[Content truncated...]";
+      extractedText =
+        extractedText.slice(0, MAX_LENGTH) + "\n\n[Content truncated...]";
     }
 
     return NextResponse.json({

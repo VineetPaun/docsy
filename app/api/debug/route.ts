@@ -31,11 +31,11 @@ export async function POST(request: NextRequest) {
 
     // @ts-expect-error - pdf-parse v1.x doesn't have types
     const pdfParse = (await import("pdf-parse/lib/pdf-parse.js")).default;
-    
+
     const buffer = Buffer.from(await file.arrayBuffer());
-    
+
     console.log(`[debug] Testing PDF: ${file.name}, size: ${buffer.length}`);
-    
+
     const result = await pdfParse(buffer);
 
     return NextResponse.json({
@@ -48,9 +48,12 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error("[debug] PDF test error:", error);
-    return NextResponse.json({
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-    }, { status: 500 });
+    return NextResponse.json(
+      {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      { status: 500 }
+    );
   }
 }

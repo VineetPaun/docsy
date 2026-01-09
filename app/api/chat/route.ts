@@ -31,15 +31,21 @@ export async function POST(request: NextRequest) {
       useRAG = true,
     } = body;
 
-    console.log(`[chat] Request received - notebookId: ${notebookId}, documents: ${documents.length}, useRAG: ${useRAG}, model: ${model}`);
+    console.log(
+      `[chat] Request received - notebookId: ${notebookId}, documents: ${documents.length}, useRAG: ${useRAG}, model: ${model}`
+    );
     documents.forEach((doc, i) => {
-      console.log(`[chat] Document ${i + 1}: ${doc.name}, content length: ${doc.content?.length || 0}`);
+      console.log(
+        `[chat] Document ${i + 1}: ${doc.name}, content length: ${doc.content?.length || 0}`
+      );
     });
 
     // Validate model - use isValidModel helper
     const selectedModel = isValidModel(model) ? model : DEFAULT_MODEL;
     if (model !== selectedModel) {
-      console.warn(`[chat] Invalid model "${model}" requested, using "${selectedModel}"`);
+      console.warn(
+        `[chat] Invalid model "${model}" requested, using "${selectedModel}"`
+      );
     }
 
     // Get the latest user message
@@ -50,21 +56,26 @@ export async function POST(request: NextRequest) {
 
     // Try RAG-based context if enabled and we have a notebookId
     // Only attempt RAG if embedding API is configured
-    const hasEmbeddingApi = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
+    const hasEmbeddingApi =
+      process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
     const hasQdrant = process.env.QDRANT_URL;
-    
-    console.log(`[chat] RAG config - hasEmbeddingApi: ${!!hasEmbeddingApi}, hasQdrant: ${!!hasQdrant}`);
-    
+
+    console.log(
+      `[chat] RAG config - hasEmbeddingApi: ${!!hasEmbeddingApi}, hasQdrant: ${!!hasQdrant}`
+    );
+
     if (useRAG && notebookId && hasEmbeddingApi && hasQdrant) {
       try {
-        console.log(`[chat] Performing RAG search for query: "${userMessage.substring(0, 50)}..."`);
+        console.log(
+          `[chat] Performing RAG search for query: "${userMessage.substring(0, 50)}..."`
+        );
         const queryEmbedding = await generateEmbedding(userMessage);
         const results = await searchChunks(queryEmbedding, notebookId, {
           limit: 5,
         });
 
         console.log(`[chat] RAG search returned ${results.length} results`);
-        
+
         if (results.length > 0) {
           documentContext = results
             .map(
@@ -72,7 +83,9 @@ export async function POST(request: NextRequest) {
                 `[Source ${i + 1}] (Score: ${r.score.toFixed(2)})\n${r.content}`
             )
             .join("\n\n---\n\n");
-          console.log(`[chat] RAG context length: ${documentContext.length} chars`);
+          console.log(
+            `[chat] RAG context length: ${documentContext.length} chars`
+          );
         }
       } catch (error) {
         console.error("[chat] RAG search error:", error);
@@ -87,7 +100,9 @@ export async function POST(request: NextRequest) {
         .filter((doc) => doc.content && doc.content.length > 0)
         .map((doc) => `=== ${doc.name} ===\n${doc.content}`)
         .join("\n\n---\n\n");
-      console.log(`[chat] Fallback context from ${documents.filter(d => d.content && d.content.length > 0).length} docs, length: ${documentContext.length} chars`);
+      console.log(
+        `[chat] Fallback context from ${documents.filter((d) => d.content && d.content.length > 0).length} docs, length: ${documentContext.length} chars`
+      );
     }
 
     // Build system prompt
@@ -95,12 +110,17 @@ export async function POST(request: NextRequest) {
 You have access to the following documents that the user has uploaded. 
 Use this context to answer questions accurately and cite specific sources when possible.
 
+If the information needed to answer the user's question is NOT in the provided documents:
+1. State clearly that the information is missing from the current sources.
+2. Suggest that the user use the "Web Search" feature in the Sources panel to find and add this information to the notebook.
+3. Do NOT claim you can search the web yourself. You can only read what is in the "DOCUMENTS" section below.
+
 DOCUMENTS:
 ${documentContext || "No documents available yet."}
 
 INSTRUCTIONS:
 - Answer questions based on the provided documents
-- If the information isn't in the documents, say so clearly
+- If the information isn't in the documents, guide the user to add it via Web Search
 - Be concise but thorough
 - Cite document names when referencing specific information
 - Use markdown formatting for better readability`;
@@ -118,10 +138,14 @@ INSTRUCTIONS:
         })),
       ];
 
-      const assistantMessage = await chatWithOpenRouter(chatMessages, selectedModel, {
-        temperature: 0.7,
-        maxTokens: 2000,
-      });
+      const assistantMessage = await chatWithOpenRouter(
+        chatMessages,
+        selectedModel,
+        {
+          temperature: 0.7,
+          maxTokens: 2000,
+        }
+      );
 
       // Extract source names for citations
       const sourceNames = documents.slice(0, 3).map((d) => d.name);
@@ -138,25 +162,28 @@ INSTRUCTIONS:
     const anthropicKey = process.env.ANTHROPIC_API_KEY;
 
     if (openaiKey) {
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${openaiKey}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            { role: "system", content: systemPrompt },
-            ...messages.map((m) => ({
-              role: m.role as "user" | "assistant",
-              content: m.content,
-            })),
-          ],
-          temperature: 0.7,
-          max_tokens: 1000,
-        }),
-      });
+      const response = await fetch(
+        "https://api.openai.com/v1/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${openaiKey}`,
+          },
+          body: JSON.stringify({
+            model: "gpt-4o-mini",
+            messages: [
+              { role: "system", content: systemPrompt },
+              ...messages.map((m) => ({
+                role: m.role as "user" | "assistant",
+                content: m.content,
+              })),
+            ],
+            temperature: 0.7,
+            max_tokens: 1000,
+          }),
+        }
+      );
 
       if (!response.ok) {
         const error = await response.text();
@@ -165,7 +192,8 @@ INSTRUCTIONS:
       }
 
       const data = await response.json();
-      const assistantMessage = data.choices[0]?.message?.content || "No response generated.";
+      const assistantMessage =
+        data.choices[0]?.message?.content || "No response generated.";
 
       return NextResponse.json({
         message: assistantMessage,
@@ -198,7 +226,8 @@ INSTRUCTIONS:
       }
 
       const data = await response.json();
-      const assistantMessage = data.content[0]?.text || "No response generated.";
+      const assistantMessage =
+        data.content[0]?.text || "No response generated.";
 
       return NextResponse.json({
         message: assistantMessage,
@@ -216,7 +245,8 @@ INSTRUCTIONS:
     });
   } catch (error) {
     console.error("Chat API error:", error);
-    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    const errorMessage =
+      error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json(
       { error: `Failed to process chat request: ${errorMessage}` },
       { status: 500 }
@@ -256,7 +286,11 @@ ${documents.map((d, i) => `${i + 1}. **${d.name}** - ${d.content?.slice(0, 100)}
 *This is a demo response. Add OPENROUTER_API_KEY for detailed analysis.*`;
   }
 
-  if (lowerQ.includes("key") || lowerQ.includes("main") || lowerQ.includes("important")) {
+  if (
+    lowerQ.includes("key") ||
+    lowerQ.includes("main") ||
+    lowerQ.includes("important")
+  ) {
     return `**Key Points from Your Sources**
 
 Here are the main topics covered:

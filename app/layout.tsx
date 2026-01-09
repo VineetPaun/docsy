@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, JetBrains_Mono } from "next/font/google";
 import { ThemeProvider } from "@/components/providers/theme-provider";
+import { ConvexClientProvider } from "@/components/providers/convex-provider";
+import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
-import {
-  ClerkProvider
-} from "@clerk/nextjs";
 
 const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
@@ -64,7 +63,7 @@ export default function RootLayout({
             enableSystem
             disableTransitionOnChange
           >
-            {children}
+            <ConvexClientProvider>{children}</ConvexClientProvider>
           </ThemeProvider>
         </body>
       </html>

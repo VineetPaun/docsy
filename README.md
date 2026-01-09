@@ -17,7 +17,7 @@
 
 ## 🛠️ Tech Stack
 
-- **Framework**: [Next.js 15 (App Router)](https://nextjs.org/)
+- **Framework**: [Next.js 16 (App Router)](https://nextjs.org/)
 - **Backend & Database**: [Convex](https://convex.dev/)
 - **Authentication**: [Clerk](https://clerk.com/)
 - **Styling**: [Tailwind CSS](https://tailwindcss.com/)
@@ -29,8 +29,7 @@
 
 ### Prerequisites
 
-- Node.js 18+
-- [Bun](https://bun.sh/) (recommended) or npm/yarn/pnpm
+- [Bun](https://bun.sh/) (recommended)
 
 ### 1. Clone the repository
 
@@ -80,7 +79,3 @@ Visit `http://localhost:3000` to see the app.
 - [ ] **YouTube Support**: Add video transcripts as sources.
 - [ ] **Knowledge Graph**: Visualize connections between your documents.
 - [ ] **Collaborative Notebooks**: Share and edit with team members.
-
-## 📄 License
-
-This project is licensed under the MIT License.

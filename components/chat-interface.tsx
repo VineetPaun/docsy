@@ -24,7 +24,10 @@ interface ChatInterfaceProps {
   notebookTitle: string;
 }
 
-export function ChatInterface({ documents, notebookTitle }: ChatInterfaceProps) {
+export function ChatInterface({
+  documents,
+  notebookTitle,
+}: ChatInterfaceProps) {
   const [messages, setMessages] = React.useState<Message[]>([]);
   const [input, setInput] = React.useState("");
   const [isLoading, setIsLoading] = React.useState(false);
@@ -39,11 +42,11 @@ export function ChatInterface({ documents, notebookTitle }: ChatInterfaceProps) 
   }, [messages]);
 
   // Combine all document content for context
-  const getDocumentContext = () => {
-    return documents
-      .map((doc) => `--- ${doc.name} ---\n${doc.content || "[No content extracted]"}`)
-      .join("\n\n");
-  };
+  // const getDocumentContext = () => {
+  //   return documents
+  //     .map((doc) => `--- ${doc.name} ---\n${doc.content || "[No content extracted]"}`)
+  //     .join("\n\n");
+  // };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,11 +67,11 @@ export function ChatInterface({ documents, notebookTitle }: ChatInterfaceProps) 
       // For now, we'll simulate an AI response
       // In a real implementation, you would call your AI API here
       // with the document context and user question
-      const context = getDocumentContext();
-      
+      // const context = getDocumentContext();
+
       // Simulated response - replace with actual AI call
       await new Promise((resolve) => setTimeout(resolve, 1000));
-      
+
       const assistantMessage: Message = {
         id: crypto.randomUUID(),
         role: "assistant",
@@ -82,7 +85,8 @@ export function ChatInterface({ documents, notebookTitle }: ChatInterfaceProps) 
       const errorMessage: Message = {
         id: crypto.randomUUID(),
         role: "assistant",
-        content: "Sorry, I encountered an error processing your request. Please try again.",
+        content:
+          "Sorry, I encountered an error processing your request. Please try again.",
         timestamp: Date.now(),
       };
       setMessages((prev) => [...prev, errorMessage]);
@@ -150,9 +154,12 @@ export function ChatInterface({ documents, notebookTitle }: ChatInterfaceProps) 
                   <path d="M12 17h.01" />
                 </svg>
               </div>
-              <h3 className="mt-4 font-semibold">Ask anything about your documents</h3>
+              <h3 className="mt-4 font-semibold">
+                Ask anything about your documents
+              </h3>
               <p className="mt-1 text-sm text-muted-foreground">
-                I can help you find information, summarize content, and answer questions.
+                I can help you find information, summarize content, and answer
+                questions.
               </p>
               <div className="mt-4 flex flex-wrap justify-center gap-2">
                 {suggestedQuestions.map((question) => (
@@ -181,7 +188,9 @@ export function ChatInterface({ documents, notebookTitle }: ChatInterfaceProps) 
                         : "bg-muted"
                     }`}
                   >
-                    <p className="whitespace-pre-wrap text-sm">{message.content}</p>
+                    <p className="whitespace-pre-wrap text-sm">
+                      {message.content}
+                    </p>
                     <p className="mt-1 text-xs opacity-70">
                       {new Date(message.timestamp).toLocaleTimeString()}
                     </p>
@@ -212,7 +221,9 @@ export function ChatInterface({ documents, notebookTitle }: ChatInterfaceProps) 
                           d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                         />
                       </svg>
-                      <span className="text-sm text-muted-foreground">Thinking...</span>
+                      <span className="text-sm text-muted-foreground">
+                        Thinking...
+                      </span>
                     </div>
                   </div>
                 </div>

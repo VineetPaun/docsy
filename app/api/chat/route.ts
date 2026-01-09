@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   chatWithOpenRouter,
-  OPENROUTER_MODELS,
   DEFAULT_MODEL,
   isValidModel,
-  type ModelId,
   type ChatMessage,
 } from "@/lib/openrouter";
 import { generateEmbedding } from "@/lib/embeddings";

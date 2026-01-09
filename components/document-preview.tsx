@@ -17,7 +17,11 @@ interface DocumentPreviewProps {
   onReprocess?: (documentId: string) => void;
 }
 
-export function DocumentPreview({ document, onClose, onReprocess }: DocumentPreviewProps) {
+export function DocumentPreview({
+  document,
+  onClose,
+  onReprocess,
+}: DocumentPreviewProps) {
   const modalRef = React.useRef<HTMLDivElement>(null);
   const [isReprocessing, setIsReprocessing] = React.useState(false);
 
@@ -26,7 +30,9 @@ export function DocumentPreview({ document, onClose, onReprocess }: DocumentPrev
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
-    document && window.addEventListener("keydown", handleEscape);
+    if (document) {
+      window.addEventListener("keydown", handleEscape);
+    }
     return () => window.removeEventListener("keydown", handleEscape);
   }, [document, onClose]);
 

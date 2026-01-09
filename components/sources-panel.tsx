@@ -48,6 +48,7 @@ export function SourcesPanel({
   // Web search state
   const [searchQuery, setSearchQuery] = React.useState("");
   const [isSearching, setIsSearching] = React.useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [searchResults, setSearchResults] = React.useState<any[]>([]);
   const [showSearchResults, setShowSearchResults] = React.useState(false);
 
@@ -55,9 +56,9 @@ export function SourcesPanel({
 
   const createDocument = useMutation(api.documents.createDocument);
   const generateUploadUrl = useMutation(api.documents.generateUploadUrl);
-  const updateDocumentContent = useMutation(
-    api.documents.updateDocumentContent
-  );
+  // const updateDocumentContent = useMutation(
+  //   api.documents.updateDocumentContent
+  // );
 
   // Function to reprocess a document that has no content
   const handleReprocessDocument = async (documentId: string) => {
@@ -72,7 +73,7 @@ export function SourcesPanel({
     try {
       // Fetch the file from Convex storage
       // We need to get the storage URL first
-      const storageUrl = `/api/convex-storage?storageId=${doc.storageId}`;
+      // const storageUrl = `/api/convex-storage?storageId=${doc.storageId}`;
 
       // For now, alert the user to re-upload
       alert(
@@ -163,6 +164,7 @@ export function SourcesPanel({
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleAddWebResult = async (result: any) => {
     try {
       console.log(`[sources-panel] Adding web result: ${result.title}`);

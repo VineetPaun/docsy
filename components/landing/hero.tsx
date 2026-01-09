@@ -39,7 +39,7 @@ export function Hero() {
           {/* CTA Buttons */}
           <div className="mt-10 flex flex-col gap-4 sm:flex-row">
             <Button size="lg" asChild className="h-12 px-8 text-base">
-              <Link href="/signup">
+              <Link href="/sign-up">
                 Get Started Free
                 <svg
                   xmlns="http://www.w3.org/2000/svg"

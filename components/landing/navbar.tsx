@@ -1,5 +1,6 @@
 "use client";
 
+import { SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -48,12 +49,17 @@ export function Navbar() {
 
         <div className="flex items-center gap-2">
           <ThemeToggle />
-          <Button variant="ghost" size="sm" asChild className="hidden sm:flex">
-            <Link href="/signin">Sign in</Link>
-          </Button>
-          <Button size="sm" asChild>
-            <Link href="/signup">Get Started</Link>
-          </Button>
+          <SignedOut>
+            <Button variant="ghost" size="sm" asChild className="hidden sm:flex">
+              <Link href="/sign-in">Sign in</Link>
+            </Button>
+            <Button size="sm" asChild>
+              <Link href="/sign-up">Get Started</Link>
+            </Button>
+          </SignedOut>
+          <SignedIn>
+            <UserButton />
+          </SignedIn>
         </div>
       </div>
     </header>

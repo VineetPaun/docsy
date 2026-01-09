@@ -23,7 +23,7 @@ export function CTA() {
             </p>
             <div className="mt-8 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
               <Button size="lg" asChild className="h-12 px-8 text-base">
-                <Link href="/signup">
+                <Link href="/sign-up">
                   Start for free
                   <svg
                     xmlns="http://www.w3.org/2000/svg"

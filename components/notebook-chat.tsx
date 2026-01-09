@@ -4,6 +4,8 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { ModelSelector } from "@/components/model-selector";
 import { DEFAULT_MODEL, isValidModel, type ModelId } from "@/lib/openrouter";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 interface Document {
   _id: string;
@@ -271,9 +273,86 @@ export function NotebookChat({
                         : "bg-muted"
                     }`}
                   >
-                    <p className="whitespace-pre-wrap text-sm">
-                      {message.content}
-                    </p>
+                    {message.role === "assistant" ? (
+                      <div className="text-sm dark:prose-invert prose-p:leading-relaxed prose-pre:p-0 prose-pre:bg-transparent max-w-none break-words">
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          components={{
+                            p: ({ children }) => (
+                              <p className="mb-2 last:mb-0">{children}</p>
+                            ),
+                            ul: ({ children }) => (
+                              <ul className="list-disc pl-4 mb-2 last:mb-0">
+                                {children}
+                              </ul>
+                            ),
+                            ol: ({ children }) => (
+                              <ol className="list-decimal pl-4 mb-2 last:mb-0">
+                                {children}
+                              </ol>
+                            ),
+                            li: ({ children }) => (
+                              <li className="mb-1 last:mb-0">{children}</li>
+                            ),
+                            h1: ({ children }) => (
+                              <h1 className="text-lg font-bold mb-2">
+                                {children}
+                              </h1>
+                            ),
+                            h2: ({ children }) => (
+                              <h2 className="text-base font-bold mb-2">
+                                {children}
+                              </h2>
+                            ),
+                            h3: ({ children }) => (
+                              <h3 className="text-sm font-bold mb-2">
+                                {children}
+                              </h3>
+                            ),
+                            code: ({
+                              // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                              node,
+                              // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                              className,
+                              children,
+                              ...props
+                            }) => {
+                              const match = /language-(\w+)/.exec(
+                                className || ""
+                              );
+                              const isInline =
+                                !match && !String(children).includes("\n");
+                              return isInline ? (
+                                <code
+                                  className="bg-muted-foreground/20 px-1 py-0.5 rounded font-mono text-xs"
+                                  {...props}
+                                >
+                                  {children}
+                                </code>
+                              ) : (
+                                <code
+                                  className="block bg-muted-foreground/10 p-2 rounded-lg font-mono text-xs overflow-x-auto my-2"
+                                  {...props}
+                                >
+                                  {children}
+                                </code>
+                              );
+                            },
+                            pre: ({ children }) => (
+                              <pre className="m-0 bg-transparent">
+                                {children}
+                              </pre>
+                            ),
+                          }}
+                        >
+                          {message.content}
+                        </ReactMarkdown>
+                      </div>
+                    ) : (
+                      <p className="whitespace-pre-wrap text-sm">
+                        {message.content}
+                      </p>
+                    )}
                   </div>
                   {message.sources && message.sources.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1">

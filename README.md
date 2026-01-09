@@ -1,36 +1,86 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Docsy 🧠📄
 
-## Getting Started
+**Docsy** is an intelligent research assistant that lets you chat with your documents. Upload PDFs, Word docs, and text files to create "Notebooks" and get instant, cited answers powered by AI.
 
-First, run the development server:
+## ✨ Features
+
+- **📚 Notebook-based Workflow**: Organize your research into separate notebooks.
+- **💬 Chat with Documents**: Ask questions across multiple documents simultaneously.
+- **📄 Multi-Format Support**:
+  - PDF (`.pdf`)
+  - Word (`.docx`, `.doc`)
+  - Text & Markdown (`.txt`, `.md`)
+- **🌐 Web Search Integration**: Enrich your research with real-time web results alongside your private documents.
+- **🔍 Vector Search**: Semantic search ensures the AI finds the most relevant context.
+- **⚡ Real-time Updates**: Built on Convex for instant syncing across devices.
+- **🔐 Secure Authentication**: Integrated with Clerk for robust user management.
+
+## 🛠️ Tech Stack
+
+- **Framework**: [Next.js 15 (App Router)](https://nextjs.org/)
+- **Backend & Database**: [Convex](https://convex.dev/)
+- **Authentication**: [Clerk](https://clerk.com/)
+- **Styling**: [Tailwind CSS](https://tailwindcss.com/)
+- **UI Components**: [shadcn/ui](https://ui.shadcn.com/)
+- **Vector Store**: Qdrant / Convex Vector Search
+- **AI Models**: Integration with OpenAI/Anthropic via OpenRouter (planned)
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+- Node.js 18+
+- [Bun](https://bun.sh/) (recommended) or npm/yarn/pnpm
+
+### 1. Clone the repository
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
+git clone https://github.com/yourusername/docsy.git
+cd docsy
+```
+
+### 2. Install dependencies
+
+```bash
+bun install
+```
+
+### 3. Set up Environment Variables
+
+Create a `.env.local` file in the root directory:
+
+```bash
+# Convex Deployment
+CONVEX_DEPLOYMENT=your_convex_deployment_url
+NEXT_PUBLIC_CONVEX_URL=your_public_convex_url
+
+# Clerk Authentication
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
+CLERK_SECRET_KEY=your_clerk_secret_key
+
+# AI & Search (Add your API keys)
+OPENROUTER_API_KEY=your_openrouter_key
+TAVILY_API_KEY=your_tavily_key
+```
+
+### 4. Run the Development Server
+
+Start the Convex backend and Next.js frontend:
+
+```bash
 bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Visit `http://localhost:3000` to see the app.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 🗺️ Roadmap & Future Features
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- [ ] **Audio Overviews**: Generate "podcast-style" summaries of your notebooks.
+- [ ] **Smart Citations**: Clickable citations that highlight the source text.
+- [ ] **YouTube Support**: Add video transcripts as sources.
+- [ ] **Knowledge Graph**: Visualize connections between your documents.
+- [ ] **Collaborative Notebooks**: Share and edit with team members.
 
-## Learn More
+## 📄 License
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+This project is licensed under the MIT License.

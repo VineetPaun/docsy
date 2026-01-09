@@ -28,11 +28,16 @@ interface NotebookChatProps {
   notebookTitle: string;
 }
 
-export function NotebookChat({ documents, notebookId, notebookTitle }: NotebookChatProps) {
+export function NotebookChat({
+  documents,
+  notebookId,
+  notebookTitle,
+}: NotebookChatProps) {
   const [messages, setMessages] = React.useState<Message[]>([]);
   const [input, setInput] = React.useState("");
   const [isLoading, setIsLoading] = React.useState(false);
-  const [selectedModel, setSelectedModel] = React.useState<ModelId>(DEFAULT_MODEL);
+  const [selectedModel, setSelectedModel] =
+    React.useState<ModelId>(DEFAULT_MODEL);
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
   const inputRef = React.useRef<HTMLTextAreaElement>(null);
 
@@ -43,7 +48,9 @@ export function NotebookChat({ documents, notebookId, notebookTitle }: NotebookC
       setSelectedModel(savedModel);
     } else if (savedModel) {
       // Clear invalid saved model
-      console.warn(`[notebook-chat] Invalid saved model "${savedModel}", resetting to default`);
+      console.warn(
+        `[notebook-chat] Invalid saved model "${savedModel}", resetting to default`
+      );
       localStorage.removeItem("docsy-model");
       setSelectedModel(DEFAULT_MODEL);
     }
@@ -156,13 +163,6 @@ export function NotebookChat({ documents, notebookId, notebookTitle }: NotebookC
         <h2 className="font-semibold">Chat</h2>
         <div className="flex items-center gap-2">
           <ModelSelector value={selectedModel} onChange={handleModelChange} />
-          <button className="rounded p-1.5 hover:bg-muted" title="More options">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="size-4">
-              <circle cx="12" cy="12" r="1" />
-              <circle cx="19" cy="12" r="1" />
-              <circle cx="5" cy="12" r="1" />
-            </svg>
-          </button>
         </div>
       </div>
 
@@ -173,27 +173,51 @@ export function NotebookChat({ documents, notebookId, notebookTitle }: NotebookC
             {!hasDocuments ? (
               <>
                 <div className="flex size-16 items-center justify-center rounded-full bg-muted">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="size-8 text-muted-foreground">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="size-8 text-muted-foreground"
+                  >
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                     <polyline points="17 8 12 3 7 8" />
                     <line x1="12" y1="3" x2="12" y2="15" />
                   </svg>
                 </div>
-                <h3 className="mt-4 text-lg font-medium">Add a source to get started</h3>
+                <h3 className="mt-4 text-lg font-medium">
+                  Add a source to get started
+                </h3>
                 <p className="mt-2 text-center text-sm text-muted-foreground max-w-sm">
-                  Upload PDFs, documents, or text files to start chatting with your content.
+                  Upload PDFs, documents, or text files to start chatting with
+                  your content.
                 </p>
               </>
             ) : (
               <>
                 <div className="flex size-16 items-center justify-center rounded-full bg-primary/10">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="size-8 text-primary">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="size-8 text-primary"
+                  >
                     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                   </svg>
                 </div>
-                <h3 className="mt-4 text-lg font-medium">Ask anything about your sources</h3>
+                <h3 className="mt-4 text-lg font-medium">
+                  Ask anything about your sources
+                </h3>
                 <p className="mt-2 text-center text-sm text-muted-foreground max-w-sm">
-                  I can help you summarize, find information, compare documents, and answer questions.
+                  I can help you summarize, find information, compare documents,
+                  and answer questions.
                 </p>
                 <div className="mt-6 flex flex-wrap justify-center gap-2">
                   {suggestedQuestions.map((question) => (
@@ -217,15 +241,29 @@ export function NotebookChat({ documents, notebookId, notebookTitle }: NotebookC
         ) : (
           <div className="p-4 space-y-6">
             {messages.map((message) => (
-              <div key={message.id} className={`flex gap-3 ${message.role === "user" ? "justify-end" : ""}`}>
+              <div
+                key={message.id}
+                className={`flex gap-3 ${message.role === "user" ? "justify-end" : ""}`}
+              >
                 {message.role === "assistant" && (
                   <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="size-4 text-primary">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="size-4 text-primary"
+                    >
                       <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
                     </svg>
                   </div>
                 )}
-                <div className={`max-w-[80%] ${message.role === "user" ? "order-first" : ""}`}>
+                <div
+                  className={`max-w-[80%] ${message.role === "user" ? "order-first" : ""}`}
+                >
                   <div
                     className={`rounded-2xl px-4 py-2.5 ${
                       message.role === "user"
@@ -233,7 +271,9 @@ export function NotebookChat({ documents, notebookId, notebookTitle }: NotebookC
                         : "bg-muted"
                     }`}
                   >
-                    <p className="whitespace-pre-wrap text-sm">{message.content}</p>
+                    <p className="whitespace-pre-wrap text-sm">
+                      {message.content}
+                    </p>
                   </div>
                   {message.sources && message.sources.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1">
@@ -242,7 +282,16 @@ export function NotebookChat({ documents, notebookId, notebookTitle }: NotebookC
                           key={i}
                           className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
                         >
-                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="size-3">
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            className="size-3"
+                          >
                             <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
                             <polyline points="14,2 14,8 20,8" />
                           </svg>
@@ -254,7 +303,16 @@ export function NotebookChat({ documents, notebookId, notebookTitle }: NotebookC
                 </div>
                 {message.role === "user" && (
                   <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="size-4">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="size-4"
+                    >
                       <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
                       <circle cx="12" cy="7" r="4" />
                     </svg>
@@ -265,15 +323,33 @@ export function NotebookChat({ documents, notebookId, notebookTitle }: NotebookC
             {isLoading && (
               <div className="flex gap-3">
                 <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="size-4 text-primary">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="size-4 text-primary"
+                  >
                     <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
                   </svg>
                 </div>
                 <div className="rounded-2xl bg-muted px-4 py-2.5">
                   <div className="flex items-center gap-1">
-                    <div className="size-2 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: "0ms" }} />
-                    <div className="size-2 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: "150ms" }} />
-                    <div className="size-2 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: "300ms" }} />
+                    <div
+                      className="size-2 rounded-full bg-muted-foreground/40 animate-bounce"
+                      style={{ animationDelay: "0ms" }}
+                    />
+                    <div
+                      className="size-2 rounded-full bg-muted-foreground/40 animate-bounce"
+                      style={{ animationDelay: "150ms" }}
+                    />
+                    <div
+                      className="size-2 rounded-full bg-muted-foreground/40 animate-bounce"
+                      style={{ animationDelay: "300ms" }}
+                    />
                   </div>
                 </div>
               </div>
@@ -297,7 +373,11 @@ export function NotebookChat({ documents, notebookId, notebookTitle }: NotebookC
                   handleSubmit();
                 }
               }}
-              placeholder={hasDocuments ? "Ask a question..." : "Upload a source to get started"}
+              placeholder={
+                hasDocuments
+                  ? "Ask a question..."
+                  : "Upload a source to get started"
+              }
               disabled={!hasDocuments || isLoading}
               rows={1}
               className="flex-1 resize-none bg-transparent py-1.5 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
@@ -313,7 +393,16 @@ export function NotebookChat({ documents, notebookId, notebookTitle }: NotebookC
                 className="size-8 rounded-full"
                 disabled={!input.trim() || isLoading || !hasDocuments}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="size-4">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="size-4"
+                >
                   <path d="m5 12 7-7 7 7" />
                   <path d="M12 19V5" />
                 </svg>

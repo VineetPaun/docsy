@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { DocumentDropzone } from "@/components/landing/document-dropzone";
 
 export function Hero() {
   return (
@@ -68,112 +69,7 @@ export function Hero() {
 
           {/* Animated Document Visual */}
           <div className="relative mt-16 w-full max-w-3xl sm:mt-20">
-            <div className="relative mx-auto aspect-[16/10] w-full overflow-hidden rounded-xl border border-border/50 bg-gradient-to-b from-muted/50 to-muted shadow-2xl">
-              {/* Chat interface mockup */}
-              <div className="absolute inset-0 p-4 sm:p-6">
-                {/* Header */}
-                <div className="flex items-center gap-2 border-b border-border/50 pb-4">
-                  <div className="flex gap-1.5">
-                    <div className="size-3 rounded-full bg-red-500/80" />
-                    <div className="size-3 rounded-full bg-yellow-500/80" />
-                    <div className="size-3 rounded-full bg-green-500/80" />
-                  </div>
-                  <div className="ml-4 h-4 w-32 rounded bg-muted-foreground/20" />
-                </div>
-
-                {/* Content area */}
-                <div className="mt-4 flex gap-4">
-                  {/* Documents sidebar */}
-                  <div className="hidden w-1/4 flex-col gap-2 sm:flex">
-                    {/* Animated floating documents */}
-                    <div className="animate-float-slow rounded-lg border border-border/50 bg-background/80 p-3 shadow-sm backdrop-blur-sm">
-                      <div className="flex items-center gap-2">
-                        <div className="flex size-8 items-center justify-center rounded bg-red-500/10">
-                          <span className="text-xs font-medium text-red-500">
-                            PDF
-                          </span>
-                        </div>
-                        <div className="flex-1">
-                          <div className="h-2 w-16 rounded bg-muted-foreground/30" />
-                          <div className="mt-1 h-1.5 w-10 rounded bg-muted-foreground/20" />
-                        </div>
-                      </div>
-                    </div>
-                    <div
-                      className="animate-float-medium rounded-lg border border-border/50 bg-background/80 p-3 shadow-sm backdrop-blur-sm"
-                      style={{ animationDelay: "0.5s" }}
-                    >
-                      <div className="flex items-center gap-2">
-                        <div className="flex size-8 items-center justify-center rounded bg-blue-500/10">
-                          <span className="text-xs font-medium text-blue-500">
-                            DOC
-                          </span>
-                        </div>
-                        <div className="flex-1">
-                          <div className="h-2 w-14 rounded bg-muted-foreground/30" />
-                          <div className="mt-1 h-1.5 w-8 rounded bg-muted-foreground/20" />
-                        </div>
-                      </div>
-                    </div>
-                    <div
-                      className="animate-float-slow rounded-lg border border-border/50 bg-background/80 p-3 shadow-sm backdrop-blur-sm"
-                      style={{ animationDelay: "1s" }}
-                    >
-                      <div className="flex items-center gap-2">
-                        <div className="flex size-8 items-center justify-center rounded bg-gray-500/10">
-                          <span className="text-xs font-medium text-gray-500">
-                            TXT
-                          </span>
-                        </div>
-                        <div className="flex-1">
-                          <div className="h-2 w-12 rounded bg-muted-foreground/30" />
-                          <div className="mt-1 h-1.5 w-6 rounded bg-muted-foreground/20" />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Chat area */}
-                  <div className="flex flex-1 flex-col gap-3">
-                    {/* User message */}
-                    <div className="ml-auto max-w-[80%] rounded-2xl rounded-br-md bg-foreground px-4 py-2 text-background">
-                      <p className="text-sm">
-                        What are the key findings from the research paper?
-                      </p>
-                    </div>
-
-                    {/* AI response */}
-                    <div className="max-w-[80%] rounded-2xl rounded-bl-md border border-border/50 bg-background/80 px-4 py-2 backdrop-blur-sm">
-                      <p className="text-sm text-muted-foreground">
-                        Based on the uploaded documents, here are the key
-                        findings:
-                      </p>
-                      <div className="mt-2 space-y-1">
-                        <div className="h-2 w-full rounded bg-muted-foreground/20" />
-                        <div className="h-2 w-4/5 rounded bg-muted-foreground/20" />
-                        <div className="h-2 w-3/5 rounded bg-muted-foreground/20" />
-                      </div>
-                    </div>
-
-                    {/* Typing indicator */}
-                    <div className="flex gap-1 px-4 py-2">
-                      <span className="size-2 animate-bounce rounded-full bg-muted-foreground/40" />
-                      <span
-                        className="size-2 animate-bounce rounded-full bg-muted-foreground/40"
-                        style={{ animationDelay: "0.15s" }}
-                      />
-                      <span
-                        className="size-2 animate-bounce rounded-full bg-muted-foreground/40"
-                        style={{ animationDelay: "0.3s" }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Gradient overlay */}
-              <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-background to-transparent" />
-            </div>
+            <DocumentDropzone />
 
             {/* Decorative elements */}
             <div className="absolute -left-4 top-1/4 size-24 rounded-full bg-gradient-to-r from-primary/20 to-transparent blur-2xl" />

@@ -124,3 +124,30 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Custom animations for landing page */
+@keyframes float-slow {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+@keyframes float-medium {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-12px);
+  }
+}
+
+.animate-float-slow {
+  animation: float-slow 4s ease-in-out infinite;
+}
+
+.animate-float-medium {
+  animation: float-medium 3s ease-in-out infinite;
+}

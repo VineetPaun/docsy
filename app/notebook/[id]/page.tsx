@@ -6,11 +6,10 @@ import { api } from "@/convex/_generated/api";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { UserSync } from "@/components/user-sync";
-import { DocumentUpload } from "@/components/document-upload";
-import { ChatInterface } from "@/components/chat-interface";
+import { SourcesPanel } from "@/components/sources-panel";
+import { NotebookChat } from "@/components/notebook-chat";
 import * as React from "react";
 
 interface Document {
@@ -18,6 +17,7 @@ interface Document {
   name: string;
   type: string;
   content?: string;
+  storageId?: string;
   createdAt: number;
 }
 
@@ -31,6 +31,9 @@ export default function NotebookPage() {
   const params = useParams();
   const notebookId = params.id as string;
   const { user, isLoaded } = useUser();
+  const [isEditingTitle, setIsEditingTitle] = React.useState(false);
+  const [editedTitle, setEditedTitle] = React.useState("");
+  const titleInputRef = React.useRef<HTMLInputElement>(null);
 
   const notebook = useQuery(
     api.notebooks.getNotebook,
@@ -43,64 +46,55 @@ export default function NotebookPage() {
   ) as Document[] | undefined;
 
   const deleteDocument = useMutation(api.documents.deleteDocument);
-
-  const [selectedDocument, setSelectedDocument] = React.useState<Document | null>(null);
-  const [showChat, setShowChat] = React.useState(false);
+  const updateNotebook = useMutation(api.notebooks.updateNotebook);
 
   const handleDeleteDocument = async (documentId: string) => {
     if (!user) return;
-
     try {
-      await deleteDocument({
-        documentId,
-        clerkId: user.id,
-      });
+      await deleteDocument({ documentId: documentId as never, clerkId: user.id });
+      // Also delete embeddings from Qdrant
+      try {
+        await fetch(`/api/embeddings?documentId=${documentId}`, {
+          method: "DELETE",
+        });
+      } catch (embedError) {
+        console.error("Failed to delete embeddings (non-fatal):", embedError);
+      }
     } catch (error) {
       console.error("Failed to delete document:", error);
     }
   };
 
-  const getFileIcon = (type: string) => {
-    switch (type.toLowerCase()) {
-      case "pdf":
-        return (
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="size-8 text-red-500">
-            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-            <polyline points="14,2 14,8 20,8" />
-            <path d="M10 12h4" />
-            <path d="M10 16h4" />
-          </svg>
-        );
-      case "docx":
-      case "doc":
-        return (
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="size-8 text-blue-500">
-            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-            <polyline points="14,2 14,8 20,8" />
-            <path d="M8 13h8" />
-            <path d="M8 17h8" />
-          </svg>
-        );
-      case "txt":
-        return (
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="size-8 text-gray-500">
-            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-            <polyline points="14,2 14,8 20,8" />
-          </svg>
-        );
-      default:
-        return (
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="size-8 text-muted-foreground">
-            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-            <polyline points="14,2 14,8 20,8" />
-          </svg>
-        );
+  const handleUpdateTitle = async () => {
+    if (!user || !notebook || !editedTitle.trim()) return;
+    try {
+      await updateNotebook({
+        notebookId: notebook._id as never,
+        clerkId: user.id,
+        title: editedTitle.trim(),
+      });
+      setIsEditingTitle(false);
+    } catch (error) {
+      console.error("Failed to update title:", error);
     }
   };
 
+  React.useEffect(() => {
+    if (notebook) {
+      setEditedTitle(notebook.title);
+    }
+  }, [notebook]);
+
+  React.useEffect(() => {
+    if (isEditingTitle && titleInputRef.current) {
+      titleInputRef.current.focus();
+      titleInputRef.current.select();
+    }
+  }, [isEditingTitle]);
+
   if (!isLoaded) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <div className="flex h-screen items-center justify-center bg-background">
         <div className="flex items-center gap-2">
           <svg className="size-5 animate-spin text-muted-foreground" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -114,7 +108,7 @@ export default function NotebookPage() {
 
   if (!user) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <div className="flex h-screen items-center justify-center bg-background">
         <div className="text-center">
           <h1 className="text-2xl font-bold">Access Denied</h1>
           <p className="mt-2 text-muted-foreground">Please sign in to access this notebook.</p>
@@ -128,10 +122,10 @@ export default function NotebookPage() {
 
   if (notebook === null) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <div className="flex h-screen items-center justify-center bg-background">
         <div className="text-center">
           <h1 className="text-2xl font-bold">Notebook Not Found</h1>
-          <p className="mt-2 text-muted-foreground">This notebook doesn&apos;t exist or you don&apos;t have access to it.</p>
+          <p className="mt-2 text-muted-foreground">This notebook doesn&apos;t exist or you don&apos;t have access.</p>
           <Button asChild className="mt-4">
             <Link href="/dashboard">Back to Dashboard</Link>
           </Button>
@@ -143,168 +137,75 @@ export default function NotebookPage() {
   return (
     <>
       <UserSync />
-      <div className="flex min-h-screen flex-col bg-background">
-        {/* Header */}
-        <header className="sticky top-0 z-50 border-b border-border/40 bg-background/80 backdrop-blur-xl">
-          <div className="container mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
-            <div className="flex items-center gap-4">
-              <Link href="/dashboard" className="flex items-center gap-2 text-muted-foreground hover:text-foreground">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="size-4">
-                  <path d="M15 18l-6-6 6-6" />
-                </svg>
-                Back
-              </Link>
-              <div className="h-6 w-px bg-border" />
-              <Link href="/" className="flex items-center gap-2">
-                <div className="flex size-8 items-center justify-center rounded-lg bg-foreground">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="size-5 text-background">
-                    <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-                    <polyline points="14,2 14,8 20,8" />
-                    <path d="M8 13h2" />
-                    <path d="M8 17h2" />
-                    <path d="M14 13h2" />
-                    <path d="M14 17h2" />
-                  </svg>
-                </div>
-                <span className="text-xl font-semibold tracking-tight">docsy</span>
-              </Link>
-            </div>
+      <div className="flex h-screen flex-col bg-background">
+        {/* Compact Header */}
+        <header className="flex h-14 shrink-0 items-center justify-between border-b border-border/40 bg-background px-4">
+          <div className="flex items-center gap-3">
+            <Link
+              href="/dashboard"
+              className="flex size-8 items-center justify-center rounded-full hover:bg-muted"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="size-5">
+                <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                <polyline points="9 22 9 12 15 12 15 22" />
+              </svg>
+            </Link>
+            
+            {notebook === undefined ? (
+              <div className="h-6 w-40 animate-pulse rounded bg-muted" />
+            ) : isEditingTitle ? (
+              <input
+                ref={titleInputRef}
+                type="text"
+                value={editedTitle}
+                onChange={(e) => setEditedTitle(e.target.value)}
+                onBlur={handleUpdateTitle}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleUpdateTitle();
+                  if (e.key === "Escape") {
+                    setEditedTitle(notebook.title);
+                    setIsEditingTitle(false);
+                  }
+                }}
+                className="bg-transparent text-lg font-medium outline-none border-b-2 border-primary"
+              />
+            ) : (
+              <button
+                onClick={() => setIsEditingTitle(true)}
+                className="text-lg font-medium hover:text-muted-foreground"
+              >
+                {notebook.title}
+              </button>
+            )}
+          </div>
 
-            <div className="flex items-center gap-4">
-              <ThemeToggle />
-              <UserButton />
-            </div>
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <UserButton />
           </div>
         </header>
 
-        {/* Main content */}
-        <main className="container mx-auto flex max-w-6xl flex-1 flex-col px-4 py-8">
-          {notebook === undefined ? (
-            <div className="space-y-4">
-              <div className="h-8 w-48 animate-pulse rounded bg-muted" />
-              <div className="h-4 w-32 animate-pulse rounded bg-muted" />
-            </div>
-          ) : (
-            <>
-              <div className="mb-8 flex items-start justify-between">
-                <div>
-                  <h1 className="text-3xl font-bold">{notebook.title}</h1>
-                  {notebook.description && (
-                    <p className="mt-1 text-muted-foreground">{notebook.description}</p>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => setShowChat(!showChat)}
-                    disabled={!documents || documents.length === 0}
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2 size-4">
-                      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                    </svg>
-                    {showChat ? "Hide Chat" : "Chat with Documents"}
-                  </Button>
-                </div>
-              </div>
+        {/* Main Content - Two Panel Layout */}
+        <div className="flex flex-1 overflow-hidden">
+          {/* Left Panel - Sources (40%) */}
+          <div className="w-[40%] min-w-[320px] max-w-[480px] border-r border-border/40">
+            <SourcesPanel
+              notebookId={notebookId}
+              clerkId={user.id}
+              documents={documents}
+              onDeleteDocument={handleDeleteDocument}
+            />
+          </div>
 
-              <div className={`grid flex-1 gap-6 ${showChat ? "lg:grid-cols-2" : ""}`}>
-                {/* Documents section */}
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h2 className="text-lg font-semibold">Documents</h2>
-                    <span className="text-sm text-muted-foreground">
-                      {documents?.length ?? 0} document{documents?.length !== 1 ? "s" : ""}
-                    </span>
-                  </div>
-
-                  {/* Upload area */}
-                  <DocumentUpload
-                    notebookId={notebookId}
-                    clerkId={user.id}
-                  />
-
-                  {/* Documents list */}
-                  {documents === undefined ? (
-                    <div className="space-y-2">
-                      {[...Array(3)].map((_, i) => (
-                        <Card key={i} className="animate-pulse">
-                          <CardContent className="flex items-center gap-4 py-4">
-                            <div className="size-8 rounded bg-muted" />
-                            <div className="flex-1">
-                              <div className="h-4 w-32 rounded bg-muted" />
-                            </div>
-                          </CardContent>
-                        </Card>
-                      ))}
-                    </div>
-                  ) : documents.length === 0 ? (
-                    <Card className="border-dashed">
-                      <CardContent className="flex flex-col items-center justify-center py-12">
-                        <div className="flex size-12 items-center justify-center rounded-full bg-muted">
-                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="size-6 text-muted-foreground">
-                            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-                            <polyline points="14,2 14,8 20,8" />
-                            <line x1="12" y1="18" x2="12" y2="12" />
-                            <line x1="9" y1="15" x2="15" y2="15" />
-                          </svg>
-                        </div>
-                        <h3 className="mt-4 font-semibold">No documents yet</h3>
-                        <p className="mt-1 text-center text-sm text-muted-foreground">
-                          Upload PDF, DOCX, or TXT files to get started
-                        </p>
-                      </CardContent>
-                    </Card>
-                  ) : (
-                    <div className="space-y-2">
-                      {documents.map((doc) => (
-                        <Card
-                          key={doc._id}
-                          className={`group cursor-pointer transition-all hover:shadow-md ${
-                            selectedDocument?._id === doc._id ? "ring-2 ring-primary" : ""
-                          }`}
-                          onClick={() => setSelectedDocument(doc)}
-                        >
-                          <CardContent className="flex items-center gap-4 py-4">
-                            {getFileIcon(doc.type)}
-                            <div className="flex-1 min-w-0">
-                              <p className="font-medium truncate">{doc.name}</p>
-                              <p className="text-sm text-muted-foreground">
-                                {doc.type.toUpperCase()} &bull; {new Date(doc.createdAt).toLocaleDateString()}
-                              </p>
-                            </div>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (confirm("Delete this document?")) {
-                                  handleDeleteDocument(doc._id);
-                                }
-                              }}
-                              className="rounded-md p-2 opacity-0 transition-opacity hover:bg-destructive/10 group-hover:opacity-100"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="size-4 text-destructive">
-                                <path d="M3 6h18" />
-                                <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
-                                <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-                              </svg>
-                            </button>
-                          </CardContent>
-                        </Card>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Chat section */}
-                {showChat && documents && documents.length > 0 && (
-                  <ChatInterface
-                    documents={documents}
-                    notebookTitle={notebook.title}
-                  />
-                )}
-              </div>
-            </>
-          )}
-        </main>
+          {/* Right Panel - Chat (60%) */}
+          <div className="flex-1">
+            <NotebookChat
+              documents={documents}
+              notebookId={notebookId}
+              notebookTitle={notebook?.title ?? "Notebook"}
+            />
+          </div>
+        </div>
       </div>
     </>
   );

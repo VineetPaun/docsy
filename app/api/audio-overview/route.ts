@@ -77,138 +77,60 @@ Remember to:
   return script;
 }
 
-// Synthesize audio using OpenAI TTS
-async function synthesizeSpeech(
-  script: string,
-  voice: "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer" = "nova"
-): Promise<ArrayBuffer | null> {
-  const openaiKey = process.env.OPENAI_API_KEY;
-  if (!openaiKey) {
-    console.log("[audio-overview] OpenAI API key not configured for TTS");
-    return null;
-  }
-
-  // Parse the script to extract dialogue
-  const lines = script.split("\n").filter((line) => line.trim());
-  const fullText = lines
-    .map((line) => {
-      // Remove speaker labels for single-voice synthesis
-      return line.replace(/^(ALEX|SAM):\s*/i, "");
-    })
-    .join(" ");
-
-  try {
-    const response = await fetch("https://api.openai.com/v1/audio/speech", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${openaiKey}`,
-      },
-      body: JSON.stringify({
-        model: "tts-1",
-        input: fullText.slice(0, 4096), // TTS has a 4096 char limit
-        voice: voice,
-        response_format: "mp3",
-      }),
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      console.error("[audio-overview] TTS API error:", error);
-      return null;
-    }
-
-    return await response.arrayBuffer();
-  } catch (error) {
-    console.error("[audio-overview] TTS synthesis error:", error);
-    return null;
-  }
-}
-
-// Multi-voice synthesis (if ElevenLabs is available)
-async function synthesizeMultiVoice(
+// Synthesize audio using ElevenLabs
+async function synthesizeWithElevenLabs(
   script: string
 ): Promise<ArrayBuffer | null> {
   const elevenLabsKey = process.env.ELEVENLABS_API_KEY;
   if (!elevenLabsKey) {
-    // Fallback to OpenAI single voice
-    return synthesizeSpeech(script);
+    console.log("[audio-overview] ElevenLabs API key not configured");
+    return null;
   }
 
-  // ElevenLabs voice IDs (you would need to configure these)
-  const voices = {
-    alex: process.env.ELEVENLABS_VOICE_ALEX || "21m00Tcm4TlvDq8ikWAM", // Rachel (default)
-    sam: process.env.ELEVENLABS_VOICE_SAM || "AZnzlk1XvdvUeBnXmlld", // Domi (default)
-  };
+  // Use a single voice for simplicity and speed
+  const voiceId = process.env.ELEVENLABS_VOICE_ID || "21m00Tcm4TlvDq8ikWAM"; // Rachel voice
+  
+  // Clean up the script - remove speaker labels for narration
+  const cleanedText = script
+    .split("\n")
+    .filter((line) => line.trim())
+    .map((line) => line.replace(/^(ALEX|SAM):\s*/i, ""))
+    .join(" ")
+    .slice(0, 5000); // ElevenLabs has limits
 
-  // Parse script into dialogue segments
-  const segments: { speaker: "alex" | "sam"; text: string }[] = [];
-  const lines = script.split("\n").filter((line) => line.trim());
-
-  for (const line of lines) {
-    const alexMatch = line.match(/^ALEX:\s*(.+)/i);
-    const samMatch = line.match(/^SAM:\s*(.+)/i);
-
-    if (alexMatch) {
-      segments.push({ speaker: "alex", text: alexMatch[1] });
-    } else if (samMatch) {
-      segments.push({ speaker: "sam", text: samMatch[1] });
-    }
-  }
-
-  if (segments.length === 0) {
-    return synthesizeSpeech(script);
-  }
+  console.log(`[audio-overview] Synthesizing ${cleanedText.length} characters with ElevenLabs`);
 
   try {
-    // Synthesize each segment (this is simplified - in production you'd batch and combine)
-    const audioChunks: ArrayBuffer[] = [];
-
-    for (const segment of segments.slice(0, 10)) {
-      // Limit segments for demo
-      const response = await fetch(
-        `https://api.elevenlabs.io/v1/text-to-speech/${voices[segment.speaker]}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "xi-api-key": elevenLabsKey,
+    const response = await fetch(
+      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "xi-api-key": elevenLabsKey,
+        },
+        body: JSON.stringify({
+          text: cleanedText,
+          model_id: "eleven_multilingual_v2",
+          voice_settings: {
+            stability: 0.5,
+            similarity_boost: 0.75,
           },
-          body: JSON.stringify({
-            text: segment.text,
-            model_id: "eleven_monolingual_v1",
-            voice_settings: {
-              stability: 0.5,
-              similarity_boost: 0.75,
-            },
-          }),
-        }
-      );
-
-      if (response.ok) {
-        audioChunks.push(await response.arrayBuffer());
+        }),
       }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[audio-overview] ElevenLabs API error:`, response.status, errorText);
+      return null;
     }
 
-    // Combine audio chunks (simplified - proper implementation would use ffmpeg)
-    if (audioChunks.length > 0) {
-      const totalLength = audioChunks.reduce(
-        (acc, chunk) => acc + chunk.byteLength,
-        0
-      );
-      const combined = new Uint8Array(totalLength);
-      let offset = 0;
-      for (const chunk of audioChunks) {
-        combined.set(new Uint8Array(chunk), offset);
-        offset += chunk.byteLength;
-      }
-      return combined.buffer;
-    }
-
-    return null;
+    console.log("[audio-overview] Audio synthesized successfully");
+    return await response.arrayBuffer();
   } catch (error) {
     console.error("[audio-overview] ElevenLabs error:", error);
-    return synthesizeSpeech(script);
+    return null;
   }
 }
 
@@ -239,29 +161,14 @@ export async function POST(request: NextRequest) {
       `[audio-overview] Script generated: ${script.length} chars, ${script.split(/\s+/).length} words`
     );
 
-    // Step 2: Attempt to synthesize audio
+    // Step 2: Synthesize audio with ElevenLabs
     let audioBase64: string | null = null;
     let audioFormat: string = "mp3";
 
-    const hasOpenAI = !!process.env.OPENAI_API_KEY;
-    const hasElevenLabs = !!process.env.ELEVENLABS_API_KEY;
-
-    if (hasElevenLabs) {
-      console.log(
-        "[audio-overview] Using ElevenLabs for multi-voice synthesis"
-      );
-      const audio = await synthesizeMultiVoice(script);
-      if (audio) {
-        audioBase64 = Buffer.from(audio).toString("base64");
-      }
-    } else if (hasOpenAI) {
-      console.log(
-        "[audio-overview] Using OpenAI TTS for single-voice synthesis"
-      );
-      const audio = await synthesizeSpeech(script);
-      if (audio) {
-        audioBase64 = Buffer.from(audio).toString("base64");
-      }
+    console.log("[audio-overview] Using ElevenLabs for audio synthesis");
+    const audio = await synthesizeWithElevenLabs(script);
+    if (audio) {
+      audioBase64 = Buffer.from(audio).toString("base64");
     }
 
     return NextResponse.json({
@@ -276,10 +183,7 @@ export async function POST(request: NextRequest) {
           }
         : {
             available: false,
-            message:
-              hasOpenAI || hasElevenLabs
-                ? "Audio synthesis failed"
-                : "Configure OPENAI_API_KEY or ELEVENLABS_API_KEY for audio synthesis",
+            message: "Audio synthesis failed",
           },
       wordCount: script.split(/\s+/).length,
       estimatedDuration: Math.round(script.split(/\s+/).length / 150), // ~150 words per minute

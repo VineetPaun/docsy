@@ -175,14 +175,20 @@ export default function AudioPlayer({
 
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
 
-  if (!audioSource && !isGenerating) {
+  // Show nothing only if we have no audio, no script, and not generating
+  if (!audioSource && !isGenerating && !scriptText) {
     return null;
   }
+
+  // If we have script but no audio, show script-only view
+  const isScriptOnly = !audioSource && scriptText && !isGenerating;
 
   return (
     <div className="bg-gradient-to-br from-purple-900/20 to-blue-900/20 border border-purple-500/30 rounded-xl p-4">
       {/* Hidden audio element */}
-      <audio ref={audioRef} src={audioSource} preload="metadata" />
+      {audioSource && (
+        <audio ref={audioRef} src={audioSource} preload="metadata" />
+      )}
 
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
@@ -193,7 +199,9 @@ export default function AudioPlayer({
           <div>
             <h3 className="font-semibold text-sm">{title}</h3>
             <p className="text-xs text-muted-foreground">
-              {formatTime(duration)} • AI-generated podcast
+              {isScriptOnly
+                ? "Script ready"
+                : `${formatTime(duration)} • AI-generated podcast`}
             </p>
           </div>
         </div>
@@ -213,113 +221,140 @@ export default function AudioPlayer({
               Regenerate
             </Button>
           )}
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleDownload}
-            disabled={!audioSource}
-            className="h-8 w-8"
-          >
-            <Download className="w-4 h-4" />
-          </Button>
-        </div>
-      </div>
-
-      {/* Progress bar */}
-      <div
-        ref={progressRef}
-        className="h-2 bg-secondary rounded-full cursor-pointer mb-3 group"
-        onClick={handleProgressClick}
-      >
-        <div
-          className="h-full bg-gradient-to-r from-purple-500 to-blue-500 rounded-full relative transition-all"
-          style={{ width: `${progressPercent}%` }}
-        >
-          <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-md opacity-0 group-hover:opacity-100 transition-opacity" />
-        </div>
-      </div>
-
-      {/* Time display */}
-      <div className="flex justify-between text-xs text-muted-foreground mb-3">
-        <span>{formatTime(currentTime)}</span>
-        <span>{formatTime(duration)}</span>
-      </div>
-
-      {/* Controls */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          {/* Restart */}
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={restart}
-            className="h-8 w-8"
-            disabled={!audioSource}
-          >
-            <RotateCcw className="w-4 h-4" />
-          </Button>
-
-          {/* Play/Pause */}
-          <Button
-            variant="default"
-            size="icon"
-            onClick={togglePlay}
-            className="h-12 w-12 rounded-full bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600"
-            disabled={!audioSource || isGenerating}
-          >
-            {isPlaying ? (
-              <Pause className="w-5 h-5 text-white" />
-            ) : (
-              <Play className="w-5 h-5 text-white ml-0.5" />
-            )}
-          </Button>
-
-          {/* Mute */}
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={toggleMute}
-            className="h-8 w-8"
-            disabled={!audioSource}
-          >
-            {isMuted ? (
-              <VolumeX className="w-4 h-4" />
-            ) : (
-              <Volume2 className="w-4 h-4" />
-            )}
-          </Button>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {/* Playback speed */}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={cyclePlaybackRate}
-            className="text-xs h-7 px-2"
-            disabled={!audioSource}
-          >
-            {playbackRate}x
-          </Button>
-
-          {/* Show transcript */}
-          {scriptText && (
+          {!isScriptOnly && (
             <Button
               variant="ghost"
-              size="sm"
-              onClick={() => setShowTranscript(!showTranscript)}
-              className="text-xs h-7"
+              size="icon"
+              onClick={handleDownload}
+              disabled={!audioSource}
+              className="h-8 w-8"
             >
-              Transcript
-              {showTranscript ? (
-                <ChevronUp className="w-3 h-3 ml-1" />
-              ) : (
-                <ChevronDown className="w-3 h-3 ml-1" />
-              )}
+              <Download className="w-4 h-4" />
             </Button>
           )}
         </div>
       </div>
+
+      {/* Progress bar - only show if we have audio */}
+      {!isScriptOnly && (
+        <>
+          <div
+            ref={progressRef}
+            className="h-2 bg-secondary rounded-full cursor-pointer mb-3 group"
+            onClick={handleProgressClick}
+          >
+            <div
+              className="h-full bg-gradient-to-r from-purple-500 to-blue-500 rounded-full relative transition-all"
+              style={{ width: `${progressPercent}%` }}
+            >
+              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-md opacity-0 group-hover:opacity-100 transition-opacity" />
+            </div>
+          </div>
+
+          {/* Time display */}
+          <div className="flex justify-between text-xs text-muted-foreground mb-3">
+            <span>{formatTime(currentTime)}</span>
+            <span>{formatTime(duration)}</span>
+          </div>
+        </>
+      )}
+
+      {/* Controls - show only if we have audio */}
+      {!isScriptOnly && (
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            {/* Restart */}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={restart}
+              className="h-8 w-8"
+              disabled={!audioSource}
+            >
+              <RotateCcw className="w-4 h-4" />
+            </Button>
+
+            {/* Play/Pause */}
+            <Button
+              variant="default"
+              size="icon"
+              onClick={togglePlay}
+              className="h-12 w-12 rounded-full bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600"
+              disabled={!audioSource || isGenerating}
+            >
+              {isPlaying ? (
+                <Pause className="w-5 h-5 text-white" />
+              ) : (
+                <Play className="w-5 h-5 text-white ml-0.5" />
+              )}
+            </Button>
+
+            {/* Mute */}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={toggleMute}
+              className="h-8 w-8"
+              disabled={!audioSource}
+            >
+              {isMuted ? (
+                <VolumeX className="w-4 h-4" />
+              ) : (
+                <Volume2 className="w-4 h-4" />
+              )}
+            </Button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* Playback speed */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={cyclePlaybackRate}
+              className="text-xs h-7 px-2"
+              disabled={!audioSource}
+            >
+              {playbackRate}x
+            </Button>
+
+            {/* Show transcript */}
+            {scriptText && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowTranscript(!showTranscript)}
+                className="text-xs h-7"
+              >
+                Transcript
+                {showTranscript ? (
+                  <ChevronUp className="w-3 h-3 ml-1" />
+                ) : (
+                  <ChevronDown className="w-3 h-3 ml-1" />
+                )}
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Script-only mode - show transcript button */}
+      {isScriptOnly && scriptText && (
+        <div className="flex flex-col items-center gap-3">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowTranscript(!showTranscript)}
+            className="text-xs"
+          >
+            {showTranscript ? "Hide" : "View"} Script
+            {showTranscript ? (
+              <ChevronUp className="w-3 h-3 ml-1" />
+            ) : (
+              <ChevronDown className="w-3 h-3 ml-1" />
+            )}
+          </Button>
+        </div>
+      )}
 
       {/* Transcript */}
       {showTranscript && scriptText && (

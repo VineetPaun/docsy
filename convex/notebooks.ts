@@ -84,6 +84,8 @@ export const updateNotebook = mutation({
     clerkId: v.string(),
     title: v.optional(v.string()),
     description: v.optional(v.string()),
+    canvasContent: v.optional(v.string()),
+    canvasHtml: v.optional(v.string()),
   },
   handler: async (ctx: any, args: any) => {
     const user = await ctx.db
@@ -104,6 +106,11 @@ export const updateNotebook = mutation({
     const updates: Record<string, unknown> = { updatedAt: Date.now() };
     if (args.title !== undefined) updates.title = args.title;
     if (args.description !== undefined) updates.description = args.description;
+    if (args.canvasContent !== undefined) {
+      updates.canvasContent = args.canvasContent;
+      updates.canvasLastEditedAt = Date.now();
+    }
+    if (args.canvasHtml !== undefined) updates.canvasHtml = args.canvasHtml;
 
     await ctx.db.patch(args.notebookId, updates);
   },

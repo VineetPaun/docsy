@@ -1,10 +1,22 @@
 "use client";
 
 import * as React from "react";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { DocumentPreview } from "@/components/document-preview";
+import AudioPlayer from "@/components/audio-player";
+import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface Document {
   _id: string;
@@ -52,10 +64,37 @@ export function SourcesPanel({
   const [searchResults, setSearchResults] = React.useState<any[]>([]);
   const [showSearchResults, setShowSearchResults] = React.useState(false);
 
+  // URL input state
+  const [urlInput, setUrlInput] = React.useState("");
+  const [isProcessingUrl, setIsProcessingUrl] = React.useState(false);
+  const [showUrlInput, setShowUrlInput] = React.useState(false);
+
+  // Audio overview state
+  const [isGeneratingAudio, setIsGeneratingAudio] = React.useState(false);
+  const [audioData, setAudioData] = React.useState<string | undefined>();
+  const [audioScript, setAudioScript] = React.useState<string | undefined>();
+  const [showAudioSection, setShowAudioSection] = React.useState(true);
+
+  // Delete confirmation dialog state
+  const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
+  const [deleteTarget, setDeleteTarget] = React.useState<{
+    type: "single" | "multiple";
+    docId?: string;
+  } | null>(null);
+
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const createDocument = useMutation(api.documents.createDocument);
   const generateUploadUrl = useMutation(api.documents.generateUploadUrl);
+  const createAudioOverview = useMutation(
+    api.audioOverviews.createAudioOverview
+  );
+
+  // Query for existing audio overview
+  const existingAudioOverview = useQuery(api.audioOverviews.getAudioOverview, {
+    notebookId: notebookId as never,
+    clerkId,
+  });
   // const updateDocumentContent = useMutation(
   //   api.documents.updateDocumentContent
   // );
@@ -75,13 +114,13 @@ export function SourcesPanel({
       // We need to get the storage URL first
       // const storageUrl = `/api/convex-storage?storageId=${doc.storageId}`;
 
-      // For now, alert the user to re-upload
-      alert(
-        `To reprocess "${doc.name}", please delete it and upload again. The new upload will extract content properly.`
+      // For now, notify the user to re-upload
+      toast.info(
+        `To reprocess "${doc.name}", please delete it and upload again.`
       );
     } catch (error) {
       console.error("[sources-panel] Reprocess error:", error);
-      alert("Failed to reprocess document");
+      toast.error("Failed to reprocess document");
     }
   };
 
@@ -154,11 +193,11 @@ export function SourcesPanel({
         setSearchResults(data.results);
       } else {
         console.error("Web search failed:", data.error || data.message);
-        alert(`Search failed: ${data.message || "Unknown error"}`);
+        toast.error(`Search failed: ${data.message || "Unknown error"}`);
       }
     } catch (error) {
       console.error("Web search error:", error);
-      alert("Failed to perform web search");
+      toast.error("Failed to perform web search");
     } finally {
       setIsSearching(false);
     }
@@ -204,18 +243,214 @@ export function SourcesPanel({
 
       // Remove from search results to indicate added
       setSearchResults((prev) => prev.filter((r) => r.url !== result.url));
+      toast.success("Web source added");
     } catch (error) {
       console.error("Failed to add web source:", error);
-      alert("Failed to add web source");
+      toast.error("Failed to add web source");
     }
   };
+
+  // Handle adding a URL (webpage or YouTube video)
+  const handleAddUrl = async () => {
+    if (!urlInput.trim()) return;
+
+    // Validate URL
+    let url: URL;
+    try {
+      url = new URL(urlInput.trim());
+    } catch {
+      toast.error("Please enter a valid URL");
+      return;
+    }
+
+    setIsProcessingUrl(true);
+
+    try {
+      console.log(`[sources-panel] Processing URL: ${urlInput}`);
+
+      // Call the process-url API
+      const response = await fetch("/api/process-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: urlInput.trim() }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || "Failed to process URL");
+      }
+
+      console.log(
+        `[sources-panel] URL processed: ${data.title} (${data.characterCount} chars)`
+      );
+
+      // Determine the document type based on sourceType
+      const isYouTube = data.sourceType === "youtube";
+      const docType = isYouTube ? "youtube" : "url";
+
+      // Create the document with the processed content
+      const doc = await createDocument({
+        notebookId: notebookId as never,
+        clerkId,
+        name: data.title || url.hostname,
+        type: docType,
+        content: data.content,
+        sourceType: data.sourceType,
+        sourceUrl: urlInput.trim(),
+        thumbnailUrl: data.thumbnailUrl,
+        metadata: JSON.stringify({
+          author: data.author,
+          description: data.description,
+          siteName: data.siteName,
+          publishedDate: data.publishedDate,
+          videoId: data.videoId,
+        }),
+      });
+
+      console.log(`[sources-panel] URL document created: ${doc}`);
+
+      // Generate embeddings for the content
+      if (data.content && data.content.length > 50) {
+        console.log(`[sources-panel] Generating embeddings for URL content`);
+        try {
+          await fetch("/api/embeddings", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              documentId: doc,
+              notebookId,
+              content: data.content,
+              documentName: data.title,
+            }),
+          });
+        } catch (error) {
+          console.error("Embedding error for URL:", error);
+        }
+      }
+
+      // Clear the input and hide
+      setUrlInput("");
+      setShowUrlInput(false);
+      toast.success("URL added successfully");
+    } catch (error) {
+      console.error("Failed to add URL:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to add URL");
+    } finally {
+      setIsProcessingUrl(false);
+    }
+  };
+
+  // Handle generating audio overview
+  const handleGenerateAudioOverview = async () => {
+    if (!documents || documents.length === 0) {
+      toast.warning(
+        "Please add some sources first to generate an audio overview."
+      );
+      return;
+    }
+
+    setIsGeneratingAudio(true);
+    setAudioData(undefined);
+    setAudioScript(undefined);
+
+    try {
+      console.log(
+        `[sources-panel] Generating audio overview for notebook: ${notebookId}`
+      );
+
+      // Create a "generating" record
+      await createAudioOverview({
+        notebookId: notebookId as never,
+        clerkId,
+        status: "generating",
+      });
+
+      // Prepare documents for the overview
+      const validDocs = documents
+        .filter((doc) => doc.content && doc.content.length > 50)
+        .map((doc) => ({ name: doc.name, content: doc.content || "" }));
+
+      if (validDocs.length === 0) {
+        throw new Error(
+          "Not enough content in sources to generate an overview."
+        );
+      }
+
+      // Call the audio overview API
+      const response = await fetch("/api/audio-overview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          notebookId,
+          notebookTitle: "Your Research",
+          documents: validDocs,
+          duration: "short", // 3-5 minutes
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || "Failed to generate audio overview");
+      }
+
+      console.log(
+        `[sources-panel] Audio overview generated: ${data.wordCount} words`
+      );
+
+      // Update the audio overview record
+      await createAudioOverview({
+        notebookId: notebookId as never,
+        clerkId,
+        status: data.audio?.available ? "ready" : "script_only",
+        scriptText: data.script,
+        duration: data.estimatedDuration,
+      });
+
+      // Set local state for immediate display
+      setAudioScript(data.script);
+      if (data.audio?.available && data.audio?.data) {
+        setAudioData(data.audio.data);
+      }
+      toast.success("Audio overview generated!");
+    } catch (error) {
+      console.error("Failed to generate audio overview:", error);
+
+      // Update record with error
+      await createAudioOverview({
+        notebookId: notebookId as never,
+        clerkId,
+        status: "error",
+        errorMessage: error instanceof Error ? error.message : "Unknown error",
+      });
+
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to generate audio overview"
+      );
+    } finally {
+      setIsGeneratingAudio(false);
+    }
+  };
+
+  // Load existing audio overview data when it changes
+  React.useEffect(() => {
+    if (existingAudioOverview) {
+      if (existingAudioOverview.scriptText) {
+        setAudioScript(existingAudioOverview.scriptText);
+      }
+      // Note: Audio data would need to be loaded from storage if we implement that
+    }
+  }, [existingAudioOverview]);
 
   const handleFiles = async (files: FileList) => {
     const validFiles = Array.from(files).filter(
       (file) => file.type in ACCEPTED_TYPES
     );
     if (validFiles.length === 0) {
-      alert("Please upload PDF, DOCX, or TXT files only.");
+      toast.error("Please upload PDF, DOCX, or TXT files only.");
       return;
     }
 
@@ -295,9 +530,10 @@ export function SourcesPanel({
         }
       }
       setUploadProgress("");
+      toast.success(`Uploaded ${validFiles.length} file(s) successfully`);
     } catch (error) {
       console.error("Upload error:", error);
-      alert("Failed to upload some files. Please try again.");
+      toast.error("Failed to upload some files. Please try again.");
     } finally {
       setIsUploading(false);
     }
@@ -330,17 +566,28 @@ export function SourcesPanel({
 
   const handleDeleteSelected = async () => {
     if (selectedDocs.size === 0) return;
+    setDeleteTarget({ type: "multiple" });
+    setDeleteDialogOpen(true);
+  };
 
-    if (
-      confirm(`Are you sure you want to delete ${selectedDocs.size} source(s)?`)
-    ) {
-      // We'll iterate and delete.
-      // Note: In a real app we might want a bulk delete API endpoint.
+  const handleConfirmDelete = () => {
+    if (deleteTarget?.type === "multiple") {
       for (const docId of selectedDocs) {
         onDeleteDocument(docId);
       }
       setSelectedDocs(new Set());
+      toast.success(`Deleted ${selectedDocs.size} source(s)`);
+    } else if (deleteTarget?.type === "single" && deleteTarget.docId) {
+      onDeleteDocument(deleteTarget.docId);
+      toast.success("Source deleted");
     }
+    setDeleteDialogOpen(false);
+    setDeleteTarget(null);
+  };
+
+  const handleDeleteSingle = (docId: string) => {
+    setDeleteTarget({ type: "single", docId });
+    setDeleteDialogOpen(true);
   };
 
   const getFileIcon = (type: string, size: "sm" | "md" = "sm") => {
@@ -351,9 +598,51 @@ export function SourcesPanel({
       doc: "text-blue-500",
       txt: "text-gray-500",
       md: "text-gray-500",
+      url: "text-green-500",
+      youtube: "text-red-600",
     };
     const color = colors[type.toLowerCase()] || "text-muted-foreground";
 
+    // YouTube icon
+    if (type.toLowerCase() === "youtube") {
+      return (
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={`${sizeClass} ${color}`}
+        >
+          <path d="M2.5 17a24.12 24.12 0 0 1 0-10 2 2 0 0 1 1.4-1.4 49.56 49.56 0 0 1 16.2 0A2 2 0 0 1 21.5 7a24.12 24.12 0 0 1 0 10 2 2 0 0 1-1.4 1.4 49.55 49.55 0 0 1-16.2 0A2 2 0 0 1 2.5 17" />
+          <path d="m10 15 5-3-5-3z" />
+        </svg>
+      );
+    }
+
+    // URL/Globe icon
+    if (type.toLowerCase() === "url") {
+      return (
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={`${sizeClass} ${color}`}
+        >
+          <circle cx="12" cy="12" r="10" />
+          <path d="M2 12h20" />
+          <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+        </svg>
+      );
+    }
+
+    // Default file icon
     return (
       <svg
         xmlns="http://www.w3.org/2000/svg"
@@ -408,57 +697,81 @@ export function SourcesPanel({
 
       {/* Add Sources Button */}
       <div className="border-b border-border/40 p-3">
-        <Button
-          variant="outline"
-          className="w-full justify-center gap-2"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={isUploading}
-        >
-          {isUploading ? (
-            <>
-              <svg
-                className="size-4 animate-spin"
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-              >
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            className="flex-1 justify-center gap-2"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isUploading || isProcessingUrl}
+          >
+            {isUploading ? (
+              <>
+                <svg
+                  className="size-4 animate-spin"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                  />
+                </svg>
+                <span className="text-sm">
+                  {uploadProgress || "Uploading..."}
+                </span>
+              </>
+            ) : (
+              <>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
                   stroke="currentColor"
-                  strokeWidth="4"
-                />
-                <path
-                  className="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                />
-              </svg>
-              <span className="text-sm">
-                {uploadProgress || "Uploading..."}
-              </span>
-            </>
-          ) : (
-            <>
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="size-4"
-              >
-                <path d="M12 5v14" />
-                <path d="M5 12h14" />
-              </svg>
-              Add sources
-            </>
-          )}
-        </Button>
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="size-4"
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+                Upload
+              </>
+            )}
+          </Button>
+          <Button
+            variant={showUrlInput ? "secondary" : "outline"}
+            className="gap-2"
+            onClick={() => setShowUrlInput(!showUrlInput)}
+            disabled={isUploading || isProcessingUrl}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="size-4"
+            >
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+            </svg>
+            Link
+          </Button>
+        </div>
         <input
           ref={fileInputRef}
           type="file"
@@ -467,6 +780,53 @@ export function SourcesPanel({
           className="hidden"
           onChange={(e) => e.target.files && handleFiles(e.target.files)}
         />
+
+        {/* URL Input Section */}
+        {showUrlInput && (
+          <div className="mt-3 space-y-2">
+            <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="size-4 text-muted-foreground shrink-0"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <path d="M2 12h20" />
+                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+              </svg>
+              <input
+                type="url"
+                placeholder="Paste URL (webpage or YouTube)"
+                className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                value={urlInput}
+                onChange={(e) => setUrlInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleAddUrl()}
+                disabled={isProcessingUrl}
+              />
+              {isProcessingUrl && (
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              )}
+            </div>
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] text-muted-foreground">
+                Supports webpages, articles, and YouTube videos
+              </p>
+              <Button
+                size="sm"
+                className="h-7 px-3 text-xs"
+                onClick={handleAddUrl}
+                disabled={!urlInput.trim() || isProcessingUrl}
+              >
+                {isProcessingUrl ? "Processing..." : "Add URL"}
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Web Search Section */}
@@ -600,6 +960,149 @@ export function SourcesPanel({
             </div>
           )}
         </div>
+      </div>
+
+      {/* Audio Overview Section */}
+      <div className="border-b border-border/40 p-3">
+        <div className="flex items-center justify-between mb-2">
+          <button
+            onClick={() => setShowAudioSection(!showAudioSection)}
+            className="flex items-center gap-2 text-sm font-medium hover:text-foreground"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="size-4 text-purple-500"
+            >
+              <path d="M12 6V2H8" />
+              <path d="m8 18-4 4V8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2Z" />
+              <path d="M2 12h2" />
+              <path d="M9 11v2" />
+              <path d="M12 11v2" />
+              <path d="M15 11v2" />
+            </svg>
+            Audio Overview
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className={`size-3 transition-transform ${showAudioSection ? "rotate-180" : ""}`}
+            >
+              <path d="m6 9 6 6 6-6" />
+            </svg>
+          </button>
+          <span className="text-[10px] text-muted-foreground bg-gradient-to-r from-purple-500/20 to-blue-500/20 px-2 py-0.5 rounded-full">
+            AI Podcast
+          </span>
+        </div>
+
+        {showAudioSection && (
+          <div className="space-y-3">
+            {/* Show existing audio or generate button */}
+            {audioData || audioScript || existingAudioOverview?.scriptText ? (
+              <AudioPlayer
+                audioData={audioData}
+                scriptText={audioScript || existingAudioOverview?.scriptText}
+                title="Audio Overview"
+                onRegenerate={handleGenerateAudioOverview}
+                isGenerating={isGeneratingAudio}
+              />
+            ) : (
+              <div className="bg-gradient-to-br from-purple-900/10 to-blue-900/10 border border-purple-500/20 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 bg-gradient-to-br from-purple-500/20 to-blue-500/20 rounded-lg flex items-center justify-center shrink-0">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="size-5 text-purple-400"
+                    >
+                      <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                      <line x1="12" x2="12" y1="19" y2="22" />
+                    </svg>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h4 className="font-medium text-sm">
+                      Generate Audio Overview
+                    </h4>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Create a podcast-style discussion about your sources with
+                      two AI hosts.
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  className="w-full mt-3 bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 text-white"
+                  onClick={handleGenerateAudioOverview}
+                  disabled={
+                    isGeneratingAudio || !documents || documents.length === 0
+                  }
+                >
+                  {isGeneratingAudio ? (
+                    <>
+                      <svg
+                        className="size-4 mr-2 animate-spin"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        />
+                      </svg>
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="size-4 mr-2"
+                      >
+                        <polygon points="6 3 20 12 6 21 6 3" />
+                      </svg>
+                      Generate Audio Overview
+                    </>
+                  )}
+                </Button>
+                {(!documents || documents.length === 0) && (
+                  <p className="text-[10px] text-muted-foreground text-center mt-2">
+                    Add sources first to generate an overview
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Sources List */}
@@ -743,11 +1246,7 @@ export function SourcesPanel({
                     </div>
                   </button>
                   <button
-                    onClick={() => {
-                      if (confirm("Delete this source?")) {
-                        onDeleteDocument(doc._id);
-                      }
-                    }}
+                    onClick={() => handleDeleteSingle(doc._id)}
                     className="rounded p-1 opacity-0 transition-opacity hover:bg-destructive/10 group-hover:opacity-100"
                   >
                     <svg
@@ -778,6 +1277,31 @@ export function SourcesPanel({
         onClose={() => setPreviewDoc(null)}
         onReprocess={handleReprocessDocument}
       />
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete Source{deleteTarget?.type === "multiple" ? "s" : ""}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget?.type === "multiple"
+                ? `Are you sure you want to delete ${selectedDocs.size} source(s)? This action cannot be undone.`
+                : "Are you sure you want to delete this source? This action cannot be undone."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

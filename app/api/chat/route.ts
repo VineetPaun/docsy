@@ -6,7 +6,19 @@ import {
   type ChatMessage,
 } from "@/lib/openrouter";
 import { generateEmbedding } from "@/lib/embeddings";
-import { searchChunks } from "@/lib/qdrant";
+import { searchChunks, type SearchResult } from "@/lib/qdrant";
+
+// Citation interface for structured source references
+export interface Citation {
+  id: number;
+  documentId: string;
+  documentName: string;
+  content: string;
+  startChar: number;
+  endChar: number;
+  pageNumber?: number;
+  score: number;
+}
 
 interface ChatRequest {
   messages: { role: "user" | "assistant"; content: string }[];
@@ -51,6 +63,7 @@ export async function POST(request: NextRequest) {
 
     // Build context from documents
     let documentContext = "";
+    let ragResults: SearchResult[] = [];
 
     // Try RAG-based context if enabled and we have a notebookId
     // Only attempt RAG if embedding API is configured
@@ -68,17 +81,17 @@ export async function POST(request: NextRequest) {
           `[chat] Performing RAG search for query: "${userMessage.substring(0, 50)}..."`
         );
         const queryEmbedding = await generateEmbedding(userMessage);
-        const results = await searchChunks(queryEmbedding, notebookId, {
+        ragResults = await searchChunks(queryEmbedding, notebookId, {
           limit: 5,
         });
 
-        console.log(`[chat] RAG search returned ${results.length} results`);
+        console.log(`[chat] RAG search returned ${ragResults.length} results`);
 
-        if (results.length > 0) {
-          documentContext = results
+        if (ragResults.length > 0) {
+          documentContext = ragResults
             .map(
               (r, i) =>
-                `[Source ${i + 1}] (Score: ${r.score.toFixed(2)})\n${r.content}`
+                `[${i + 1}] From "${r.documentName || "Unknown"}"${r.pageNumber ? ` (Page ${r.pageNumber})` : ""} (Score: ${r.score.toFixed(2)})\n${r.content}`
             )
             .join("\n\n---\n\n");
           console.log(
@@ -90,6 +103,18 @@ export async function POST(request: NextRequest) {
         // Fall back to full document context
       }
     }
+
+    // Build citations array from RAG results
+    const citations: Citation[] = ragResults.map((r, i) => ({
+      id: i + 1,
+      documentId: r.documentId,
+      documentName: r.documentName || "Unknown",
+      content: r.content,
+      startChar: r.startChar,
+      endChar: r.endChar,
+      pageNumber: r.pageNumber,
+      score: r.score,
+    }));
 
     // If RAG didn't return results, use full document content
     if (!documentContext) {
@@ -103,10 +128,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Build system prompt
+    // Build system prompt with citation instructions
     const systemPrompt = `You are a helpful AI assistant for a notebook called "${notebookTitle}". 
 You have access to the following documents that the user has uploaded. 
-Use this context to answer questions accurately and cite specific sources when possible.
+Use this context to answer questions accurately and ALWAYS cite your sources using [1], [2], etc. notation.
+
+CITATION RULES:
+- When you reference information from the sources, include the citation number in brackets like [1] or [2]
+- Place citations immediately after the relevant statement
+- You can cite multiple sources for the same statement like [1][3]
+- Each number corresponds to the source numbers below
 
 If the information needed to answer the user's question is NOT in the provided documents:
 1. State clearly that the information is missing from the current sources.
@@ -118,9 +149,9 @@ ${documentContext || "No documents available yet."}
 
 INSTRUCTIONS:
 - Answer questions based on the provided documents
+- ALWAYS use [1], [2], etc. to cite your sources when referencing information
 - If the information isn't in the documents, guide the user to add it via Web Search
 - Be concise but thorough
-- Cite document names when referencing specific information
 - Use markdown formatting for better readability`;
 
     // Check for OpenRouter API key
@@ -151,6 +182,7 @@ INSTRUCTIONS:
       return NextResponse.json({
         message: assistantMessage,
         sources: sourceNames,
+        citations,
         model: selectedModel,
       });
     }
@@ -196,6 +228,7 @@ INSTRUCTIONS:
       return NextResponse.json({
         message: assistantMessage,
         sources: documents.slice(0, 3).map((d) => d.name),
+        citations,
         model: "openai/gpt-4o-mini",
       });
     } else if (anthropicKey) {
@@ -230,6 +263,7 @@ INSTRUCTIONS:
       return NextResponse.json({
         message: assistantMessage,
         sources: documents.slice(0, 3).map((d) => d.name),
+        citations,
         model: "anthropic/claude-3-haiku",
       });
     }
@@ -238,6 +272,7 @@ INSTRUCTIONS:
     return NextResponse.json({
       message: generateDemoResponse(userMessage, documents, notebookTitle),
       sources: documents.slice(0, 2).map((d) => d.name),
+      citations: [],
       isDemo: true,
       model: "demo",
     });

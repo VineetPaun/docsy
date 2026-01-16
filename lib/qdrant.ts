@@ -24,6 +24,9 @@ export interface DocumentChunk {
   notebookId: string;
   content: string;
   chunkIndex: number;
+  startChar: number;
+  endChar: number;
+  pageNumber?: number;
   metadata?: Record<string, unknown>;
 }
 
@@ -32,6 +35,10 @@ export interface SearchResult {
   documentId: string;
   content: string;
   score: number;
+  startChar: number;
+  endChar: number;
+  pageNumber?: number;
+  documentName?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -79,6 +86,9 @@ export async function storeChunks(
       notebookId: chunk.notebookId,
       content: chunk.content,
       chunkIndex: chunk.chunkIndex,
+      startChar: chunk.startChar,
+      endChar: chunk.endChar,
+      pageNumber: chunk.pageNumber,
       ...chunk.metadata,
     },
   }));
@@ -124,6 +134,10 @@ export async function searchChunks(
     documentId: result.payload?.documentId as string,
     content: result.payload?.content as string,
     score: result.score,
+    startChar: (result.payload?.startChar as number) ?? 0,
+    endChar: (result.payload?.endChar as number) ?? 0,
+    pageNumber: result.payload?.pageNumber as number | undefined,
+    documentName: result.payload?.documentName as string | undefined,
     metadata: result.payload as Record<string, unknown>,
   }));
 }
@@ -152,15 +166,62 @@ export async function deleteNotebookChunks(notebookId: string): Promise<void> {
   });
 }
 
-// Text chunking utility
+// Text chunking utility with position tracking
+export interface ChunkWithPosition {
+  text: string;
+  startChar: number;
+  endChar: number;
+  pageNumber?: number;
+}
+
 export function chunkText(
   text: string,
   options?: { chunkSize?: number; overlap?: number }
 ): string[] {
+  return chunkTextWithPositions(text, options).map((chunk) => chunk.text);
+}
+
+export function chunkTextWithPositions(
+  text: string,
+  options?: { chunkSize?: number; overlap?: number }
+): ChunkWithPosition[] {
   const chunkSize = options?.chunkSize ?? 1000;
   const overlap = options?.overlap ?? 200;
 
-  const chunks: string[] = [];
+  // Detect page boundaries (form feed characters or page markers)
+  const pageBreaks: number[] = [];
+  let searchIndex = 0;
+  while (searchIndex < text.length) {
+    const ffIndex = text.indexOf("\f", searchIndex);
+    const pageMarkerIndex = text.indexOf("\n--- Page ", searchIndex);
+
+    if (
+      ffIndex !== -1 &&
+      (pageMarkerIndex === -1 || ffIndex < pageMarkerIndex)
+    ) {
+      pageBreaks.push(ffIndex);
+      searchIndex = ffIndex + 1;
+    } else if (pageMarkerIndex !== -1) {
+      pageBreaks.push(pageMarkerIndex);
+      searchIndex = pageMarkerIndex + 1;
+    } else {
+      break;
+    }
+  }
+
+  const getPageNumber = (charIndex: number): number => {
+    let page = 1;
+    for (const breakPoint of pageBreaks) {
+      if (charIndex > breakPoint) {
+        page++;
+      } else {
+        break;
+      }
+    }
+    return page;
+  };
+
+  const chunks: ChunkWithPosition[] = [];
   let start = 0;
 
   while (start < text.length) {
@@ -177,9 +238,18 @@ export function chunkText(
       }
     }
 
-    chunks.push(text.slice(start, end).trim());
+    const chunkText = text.slice(start, end).trim();
+    if (chunkText.length > 50) {
+      chunks.push({
+        text: chunkText,
+        startChar: start,
+        endChar: end,
+        pageNumber: pageBreaks.length > 0 ? getPageNumber(start) : undefined,
+      });
+    }
+
     start = end - overlap;
   }
 
-  return chunks.filter((chunk) => chunk.length > 50);
+  return chunks;
 }

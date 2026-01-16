@@ -7,6 +7,18 @@ import { DEFAULT_MODEL, isValidModel, type ModelId } from "@/lib/openrouter";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+// Citation interface matching the API response
+export interface Citation {
+  id: number;
+  documentId: string;
+  documentName: string;
+  content: string;
+  startChar: number;
+  endChar: number;
+  pageNumber?: number;
+  score: number;
+}
+
 interface Document {
   _id: string;
   name: string;
@@ -22,18 +34,21 @@ interface Message {
   content: string;
   timestamp: number;
   sources?: string[];
+  citations?: Citation[];
 }
 
 interface NotebookChatProps {
   documents: Document[] | undefined;
   notebookId: string;
   notebookTitle: string;
+  onCitationClick?: (citation: Citation) => void;
 }
 
 export function NotebookChat({
   documents,
   notebookId,
   notebookTitle,
+  onCitationClick,
 }: NotebookChatProps) {
   const [messages, setMessages] = React.useState<Message[]>([]);
   const [input, setInput] = React.useState("");
@@ -132,6 +147,7 @@ export function NotebookChat({
         content: data.message,
         timestamp: Date.now(),
         sources: data.sources,
+        citations: data.citations || [],
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
@@ -157,6 +173,60 @@ export function NotebookChat({
   ];
 
   const hasDocuments = documents && documents.length > 0;
+
+  // Helper function to render text with clickable citations
+  const renderWithCitations = (text: string, citations?: Citation[]) => {
+    if (!citations || citations.length === 0) {
+      return text;
+    }
+
+    // Replace [1], [2], etc. with clickable spans
+    const parts: React.ReactNode[] = [];
+    let lastIndex = 0;
+    const regex = /\[(\d+)\]/g;
+    let match;
+
+    while ((match = regex.exec(text)) !== null) {
+      // Add text before the citation
+      if (match.index > lastIndex) {
+        parts.push(text.slice(lastIndex, match.index));
+      }
+
+      const citationNum = parseInt(match[1], 10);
+      const citation = citations.find((c) => c.id === citationNum);
+
+      if (citation && onCitationClick) {
+        parts.push(
+          <button
+            key={`citation-${match.index}`}
+            onClick={() => onCitationClick(citation)}
+            className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 mx-0.5 text-xs font-medium bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors cursor-pointer"
+            title={`From "${citation.documentName}"${citation.pageNumber ? ` (Page ${citation.pageNumber})` : ""} - Click to view source`}
+          >
+            {citationNum}
+          </button>
+        );
+      } else {
+        parts.push(
+          <span
+            key={`citation-${match.index}`}
+            className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 mx-0.5 text-xs font-medium bg-muted text-muted-foreground rounded"
+          >
+            {citationNum}
+          </span>
+        );
+      }
+
+      lastIndex = match.index + match[0].length;
+    }
+
+    // Add remaining text
+    if (lastIndex < text.length) {
+      parts.push(text.slice(lastIndex));
+    }
+
+    return parts.length > 0 ? parts : text;
+  };
 
   return (
     <div className="flex h-full flex-col">
@@ -270,8 +340,24 @@ export function NotebookChat({
                     className={`rounded-2xl px-4 py-2.5 ${
                       message.role === "user"
                         ? "bg-primary text-primary-foreground"
-                        : "bg-muted"
+                        : "bg-muted cursor-grab active:cursor-grabbing"
                     }`}
+                    draggable={message.role === "assistant"}
+                    onDragStart={(e) => {
+                      if (message.role === "assistant") {
+                        e.dataTransfer.setData("text/plain", message.content);
+                        e.dataTransfer.setData(
+                          "application/docsy-chat",
+                          "true"
+                        );
+                        e.dataTransfer.effectAllowed = "copy";
+                      }
+                    }}
+                    title={
+                      message.role === "assistant"
+                        ? "Drag to add to your document"
+                        : undefined
+                    }
                   >
                     {message.role === "assistant" ? (
                       <div className="text-sm dark:prose-invert prose-p:leading-relaxed prose-pre:p-0 prose-pre:bg-transparent max-w-none break-words">
@@ -279,7 +365,17 @@ export function NotebookChat({
                           remarkPlugins={[remarkGfm]}
                           components={{
                             p: ({ children }) => (
-                              <p className="mb-2 last:mb-0">{children}</p>
+                              <p className="mb-2 last:mb-0">
+                                {React.Children.map(children, (child) => {
+                                  if (typeof child === "string") {
+                                    return renderWithCitations(
+                                      child,
+                                      message.citations
+                                    );
+                                  }
+                                  return child;
+                                })}
+                              </p>
                             ),
                             ul: ({ children }) => (
                               <ul className="list-disc pl-4 mb-2 last:mb-0">
@@ -292,7 +388,17 @@ export function NotebookChat({
                               </ol>
                             ),
                             li: ({ children }) => (
-                              <li className="mb-1 last:mb-0">{children}</li>
+                              <li className="mb-1 last:mb-0">
+                                {React.Children.map(children, (child) => {
+                                  if (typeof child === "string") {
+                                    return renderWithCitations(
+                                      child,
+                                      message.citations
+                                    );
+                                  }
+                                  return child;
+                                })}
+                              </li>
                             ),
                             h1: ({ children }) => (
                               <h1 className="text-lg font-bold mb-2">
@@ -308,6 +414,32 @@ export function NotebookChat({
                               <h3 className="text-sm font-bold mb-2">
                                 {children}
                               </h3>
+                            ),
+                            strong: ({ children }) => (
+                              <strong>
+                                {React.Children.map(children, (child) => {
+                                  if (typeof child === "string") {
+                                    return renderWithCitations(
+                                      child,
+                                      message.citations
+                                    );
+                                  }
+                                  return child;
+                                })}
+                              </strong>
+                            ),
+                            em: ({ children }) => (
+                              <em>
+                                {React.Children.map(children, (child) => {
+                                  if (typeof child === "string") {
+                                    return renderWithCitations(
+                                      child,
+                                      message.citations
+                                    );
+                                  }
+                                  return child;
+                                })}
+                              </em>
                             ),
                             code: ({
                               // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -354,7 +486,31 @@ export function NotebookChat({
                       </p>
                     )}
                   </div>
-                  {message.sources && message.sources.length > 0 && (
+                  {/* Show citations if available, otherwise fall back to sources */}
+                  {message.citations && message.citations.length > 0 ? (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {message.citations.map((citation) => (
+                        <button
+                          key={citation.id}
+                          onClick={() => onCitationClick?.(citation)}
+                          className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 hover:bg-primary/20 px-2.5 py-1 text-xs transition-colors cursor-pointer group"
+                          title={`Click to view source passage${citation.pageNumber ? ` (Page ${citation.pageNumber})` : ""}`}
+                        >
+                          <span className="flex items-center justify-center size-4 rounded-full bg-primary text-primary-foreground text-[10px] font-medium">
+                            {citation.id}
+                          </span>
+                          <span className="text-muted-foreground group-hover:text-foreground transition-colors truncate max-w-[150px]">
+                            {citation.documentName}
+                          </span>
+                          {citation.pageNumber && (
+                            <span className="text-muted-foreground/60 text-[10px]">
+                              p.{citation.pageNumber}
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  ) : message.sources && message.sources.length > 0 ? (
                     <div className="mt-2 flex flex-wrap gap-1">
                       {message.sources.map((source, i) => (
                         <span
@@ -378,7 +534,7 @@ export function NotebookChat({
                         </span>
                       ))}
                     </div>
-                  )}
+                  ) : null}
                 </div>
                 {message.role === "user" && (
                   <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted">

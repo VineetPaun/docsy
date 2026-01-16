@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateEmbeddings } from "@/lib/embeddings";
-import { storeChunks, deleteDocumentChunks, chunkText, type DocumentChunk } from "@/lib/qdrant";
+import {
+  storeChunks,
+  deleteDocumentChunks,
+  chunkTextWithPositions,
+  type DocumentChunk,
+} from "@/lib/qdrant";
+import { randomUUID } from "crypto";
 
 interface EmbeddingsRequest {
   documentId: string;
@@ -14,7 +20,9 @@ export async function POST(request: NextRequest) {
     const body: EmbeddingsRequest = await request.json();
     const { documentId, notebookId, content, documentName } = body;
 
-    console.log(`[embeddings] Request received - documentId: ${documentId}, notebookId: ${notebookId}, content length: ${content?.length || 0}`);
+    console.log(
+      `[embeddings] Request received - documentId: ${documentId}, notebookId: ${notebookId}, content length: ${content?.length || 0}`
+    );
 
     if (!documentId || !notebookId || !content) {
       console.error(`[embeddings] Missing required fields`);
@@ -34,19 +42,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log(`[embeddings] Deleting existing chunks for document: ${documentId}`);
+    console.log(
+      `[embeddings] Deleting existing chunks for document: ${documentId}`
+    );
     // Delete existing chunks for this document (in case of re-processing)
     await deleteDocumentChunks(documentId);
 
-    // Split content into chunks
-    const textChunks = chunkText(content, {
+    // Split content into chunks with position tracking
+    const textChunksWithPositions = chunkTextWithPositions(content, {
       chunkSize: 1000,
       overlap: 200,
     });
 
-    console.log(`[embeddings] Created ${textChunks.length} chunks from content`);
+    console.log(
+      `[embeddings] Created ${textChunksWithPositions.length} chunks from content`
+    );
 
-    if (textChunks.length === 0) {
+    if (textChunksWithPositions.length === 0) {
       console.log(`[embeddings] No content to embed`);
       return NextResponse.json({
         success: true,
@@ -55,28 +67,39 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    console.log(`[embeddings] Generating embeddings for ${textChunks.length} chunks`);
+    const textChunks = textChunksWithPositions.map((c) => c.text);
+
+    console.log(
+      `[embeddings] Generating embeddings for ${textChunks.length} chunks`
+    );
     // Generate embeddings for all chunks
     const embeddings = await generateEmbeddings(textChunks);
     console.log(`[embeddings] Generated ${embeddings.length} embeddings`);
 
-    // Create document chunks with metadata
-    const chunks: DocumentChunk[] = textChunks.map((text, index) => ({
-      id: `${documentId}_chunk_${index}`,
-      documentId,
-      notebookId,
-      content: text,
-      chunkIndex: index,
-      metadata: {
-        documentName: documentName || "Untitled",
-        totalChunks: textChunks.length,
-      },
-    }));
+    // Create document chunks with metadata including positions
+    const chunks: DocumentChunk[] = textChunksWithPositions.map(
+      (chunk, index) => ({
+        id: randomUUID(), // Qdrant requires UUID format
+        documentId,
+        notebookId,
+        content: chunk.text,
+        chunkIndex: index,
+        startChar: chunk.startChar,
+        endChar: chunk.endChar,
+        pageNumber: chunk.pageNumber,
+        metadata: {
+          documentName: documentName || "Untitled",
+          totalChunks: textChunksWithPositions.length,
+        },
+      })
+    );
 
     console.log(`[embeddings] Storing ${chunks.length} chunks in Qdrant`);
     // Store in Qdrant
     await storeChunks(chunks, embeddings);
-    console.log(`[embeddings] Successfully stored chunks for document: ${documentName}`);
+    console.log(
+      `[embeddings] Successfully stored chunks for document: ${documentName}`
+    );
 
     return NextResponse.json({
       success: true,

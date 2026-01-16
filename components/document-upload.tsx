@@ -5,6 +5,7 @@ import { useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 
 interface DocumentUploadProps {
   notebookId: string;
@@ -13,7 +14,8 @@ interface DocumentUploadProps {
 
 const ACCEPTED_TYPES = {
   "application/pdf": "pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+    "docx",
   "application/msword": "doc",
   "text/plain": "txt",
   "text/markdown": "md",
@@ -46,7 +48,7 @@ export function DocumentUpload({ notebookId, clerkId }: DocumentUploadProps) {
     );
 
     if (validFiles.length === 0) {
-      alert("Please upload PDF, DOCX, or TXT files only.");
+      toast.error("Please upload PDF, DOCX, or TXT files only.");
       return;
     }
 
@@ -55,7 +57,9 @@ export function DocumentUpload({ notebookId, clerkId }: DocumentUploadProps) {
     try {
       for (let i = 0; i < validFiles.length; i++) {
         const file = validFiles[i];
-        setUploadProgress(`Uploading ${i + 1}/${validFiles.length}: ${file.name}`);
+        setUploadProgress(
+          `Uploading ${i + 1}/${validFiles.length}: ${file.name}`
+        );
 
         const type = ACCEPTED_TYPES[file.type as keyof typeof ACCEPTED_TYPES];
 
@@ -88,9 +92,10 @@ export function DocumentUpload({ notebookId, clerkId }: DocumentUploadProps) {
       }
 
       setUploadProgress("");
+      toast.success("Files uploaded successfully");
     } catch (error) {
       console.error("Upload error:", error);
-      alert("Failed to upload some files. Please try again.");
+      toast.error("Failed to upload some files. Please try again.");
     } finally {
       setIsUploading(false);
     }
@@ -155,7 +160,9 @@ export function DocumentUpload({ notebookId, clerkId }: DocumentUploadProps) {
                 d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
               />
             </svg>
-            <p className="mt-4 text-sm text-muted-foreground">{uploadProgress}</p>
+            <p className="mt-4 text-sm text-muted-foreground">
+              {uploadProgress}
+            </p>
           </>
         ) : (
           <>

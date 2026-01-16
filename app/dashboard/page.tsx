@@ -10,6 +10,17 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { UserSync } from "@/components/user-sync";
 import { useConvexAvailable } from "@/components/providers/convex-provider";
 import { mockNotebooks } from "@/hooks/use-convex-status";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { toast } from "sonner";
 import * as React from "react";
 
 interface Notebook {
@@ -23,13 +34,13 @@ interface Notebook {
 export default function DashboardPage() {
   const { user, isLoaded } = useUser();
   const isConvexAvailable = useConvexAvailable();
-  
+
   // Only use Convex hooks when available
   const convexNotebooks = useQuery(
     api.notebooks.getNotebooks,
     isConvexAvailable && user ? { clerkId: user.id } : "skip"
   ) as Notebook[] | undefined;
-  
+
   const createNotebookMutation = useMutation(api.notebooks.createNotebook);
   const deleteNotebookMutation = useMutation(api.notebooks.deleteNotebook);
 
@@ -45,6 +56,10 @@ export default function DashboardPage() {
 
   const [isCreating, setIsCreating] = React.useState(false);
   const [newTitle, setNewTitle] = React.useState("");
+  const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
+  const [notebookToDelete, setNotebookToDelete] = React.useState<string | null>(
+    null
+  );
 
   const handleCreateNotebook = async () => {
     if (!user || !newTitle.trim()) return;
@@ -84,13 +99,24 @@ export default function DashboardPage() {
           clerkId: user.id,
           notebookId: notebookId as never,
         });
+        toast.success("Notebook deleted");
       } catch (error) {
         console.error("Failed to delete notebook:", error);
+        toast.error("Failed to delete notebook");
       }
     } else {
       // Mock delete
       setLocalNotebooks((prev) => prev.filter((n) => n._id !== notebookId));
+      toast.success("Notebook deleted");
     }
+  };
+
+  const handleConfirmDelete = () => {
+    if (notebookToDelete) {
+      handleDeleteNotebook(notebookToDelete);
+    }
+    setDeleteDialogOpen(false);
+    setNotebookToDelete(null);
   };
 
   if (!isLoaded) {
@@ -181,7 +207,8 @@ export default function DashboardPage() {
         {/* Demo mode banner */}
         {!isConvexAvailable && (
           <div className="border-b border-yellow-500/20 bg-yellow-500/10 px-4 py-2 text-center text-sm text-yellow-700 dark:text-yellow-400">
-            Demo Mode: Convex is not configured. Data is stored locally and will be lost on refresh.
+            Demo Mode: Convex is not configured. Data is stored locally and will
+            be lost on refresh.
           </div>
         )}
 
@@ -229,10 +256,16 @@ export default function DashboardPage() {
                     }}
                     autoFocus
                   />
-                  <Button onClick={handleCreateNotebook} disabled={!newTitle.trim()}>
+                  <Button
+                    onClick={handleCreateNotebook}
+                    disabled={!newTitle.trim()}
+                  >
                     Create
                   </Button>
-                  <Button variant="outline" onClick={() => setIsCreating(false)}>
+                  <Button
+                    variant="outline"
+                    onClick={() => setIsCreating(false)}
+                  >
                     Cancel
                   </Button>
                 </div>
@@ -321,9 +354,8 @@ export default function DashboardPage() {
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
-                      if (confirm("Delete this notebook?")) {
-                        handleDeleteNotebook(notebook._id);
-                      }
+                      setNotebookToDelete(notebook._id);
+                      setDeleteDialogOpen(true);
                     }}
                     className="absolute right-3 top-3 rounded-md p-1 opacity-0 transition-opacity hover:bg-destructive/10 group-hover:opacity-100"
                   >
@@ -348,6 +380,29 @@ export default function DashboardPage() {
           )}
         </main>
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Notebook</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this notebook? This will
+              permanently remove the notebook and all its sources. This action
+              cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

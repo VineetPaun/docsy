@@ -9,7 +9,12 @@ import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { UserSync } from "@/components/user-sync";
 import { SourcesPanel } from "@/components/sources-panel";
-import { NotebookChat } from "@/components/notebook-chat";
+import { NotebookChat, type Citation } from "@/components/notebook-chat";
+import {
+  DocumentPreview,
+  type HighlightRange,
+} from "@/components/document-preview";
+import { CanvasEditor } from "@/components/canvas-editor";
 import * as React from "react";
 
 interface Document {
@@ -25,7 +30,12 @@ interface Notebook {
   _id: string;
   title: string;
   description?: string;
+  canvasContent?: string;
+  canvasHtml?: string;
 }
+
+// Tab type for the right panel
+type RightPanelTab = "chat" | "write";
 
 export default function NotebookPage() {
   const params = useParams();
@@ -34,6 +44,17 @@ export default function NotebookPage() {
   const [isEditingTitle, setIsEditingTitle] = React.useState(false);
   const [editedTitle, setEditedTitle] = React.useState("");
   const titleInputRef = React.useRef<HTMLInputElement>(null);
+
+  // Tab state for Chat vs Write mode
+  const [activeTab, setActiveTab] = React.useState<RightPanelTab>("chat");
+
+  // Citation preview state
+  const [previewDocument, setPreviewDocument] = React.useState<Document | null>(
+    null
+  );
+  const [highlightRange, setHighlightRange] = React.useState<
+    HighlightRange | undefined
+  >(undefined);
 
   const notebook = useQuery(
     api.notebooks.getNotebook,
@@ -96,6 +117,47 @@ export default function NotebookPage() {
       titleInputRef.current.select();
     }
   }, [isEditingTitle]);
+
+  // Handle citation click - open document preview with highlight
+  const handleCitationClick = React.useCallback(
+    (citation: Citation) => {
+      // Find the document by ID
+      const doc = documents?.find((d) => d._id === citation.documentId);
+      if (doc) {
+        setPreviewDocument(doc);
+        setHighlightRange({
+          startChar: citation.startChar,
+          endChar: citation.endChar,
+          pageNumber: citation.pageNumber,
+        });
+      }
+    },
+    [documents]
+  );
+
+  // Close preview handler
+  const handleClosePreview = React.useCallback(() => {
+    setPreviewDocument(null);
+    setHighlightRange(undefined);
+  }, []);
+
+  // Handle canvas content changes
+  const handleCanvasChange = React.useCallback(
+    async (content: string, html: string) => {
+      if (!user || !notebook) return;
+      try {
+        await updateNotebook({
+          notebookId: notebook._id as never,
+          clerkId: user.id,
+          canvasContent: content,
+          canvasHtml: html,
+        });
+      } catch (error) {
+        console.error("Failed to save canvas:", error);
+      }
+    },
+    [user, notebook, updateNotebook]
+  );
 
   if (!isLoaded) {
     return (
@@ -223,6 +285,54 @@ export default function NotebookPage() {
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Mode Tabs */}
+            <div className="flex items-center rounded-lg bg-muted p-0.5">
+              <button
+                onClick={() => setActiveTab("chat")}
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                  activeTab === "chat"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="size-4"
+                >
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                </svg>
+                Chat
+              </button>
+              <button
+                onClick={() => setActiveTab("write")}
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                  activeTab === "write"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="size-4"
+                >
+                  <path d="M12 20h9" />
+                  <path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.855z" />
+                </svg>
+                Write
+              </button>
+            </div>
             <ThemeToggle />
             <UserButton />
           </div>
@@ -240,15 +350,31 @@ export default function NotebookPage() {
             />
           </div>
 
-          {/* Right Panel - Chat (60%) */}
+          {/* Right Panel - Chat or Write */}
           <div className="flex-1">
-            <NotebookChat
-              documents={documents}
-              notebookId={notebookId}
-              notebookTitle={notebook?.title ?? "Notebook"}
-            />
+            {activeTab === "chat" ? (
+              <NotebookChat
+                documents={documents}
+                notebookId={notebookId}
+                notebookTitle={notebook?.title ?? "Notebook"}
+                onCitationClick={handleCitationClick}
+              />
+            ) : (
+              <CanvasEditor
+                initialContent={notebook?.canvasContent}
+                onContentChange={handleCanvasChange}
+                notebookTitle={notebook?.title}
+              />
+            )}
           </div>
         </div>
+
+        {/* Document Preview Modal for Citations */}
+        <DocumentPreview
+          document={previewDocument}
+          onClose={handleClosePreview}
+          highlightRange={highlightRange}
+        />
       </div>
     </>
   );

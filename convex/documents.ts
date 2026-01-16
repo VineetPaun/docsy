@@ -63,6 +63,10 @@ export const createDocument = mutation({
     type: v.string(),
     content: v.optional(v.string()),
     storageId: v.optional(v.string()),
+    sourceType: v.optional(v.string()),
+    sourceUrl: v.optional(v.string()),
+    thumbnailUrl: v.optional(v.string()),
+    metadata: v.optional(v.string()),
   },
   handler: async (ctx: any, args: any) => {
     const user = await ctx.db
@@ -87,6 +91,10 @@ export const createDocument = mutation({
       type: args.type,
       content: args.content,
       storageId: args.storageId,
+      sourceType: args.sourceType || "file",
+      sourceUrl: args.sourceUrl,
+      thumbnailUrl: args.thumbnailUrl,
+      metadata: args.metadata,
       createdAt: Date.now(),
     });
 

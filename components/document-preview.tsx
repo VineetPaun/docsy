@@ -11,19 +11,42 @@ interface Document {
   createdAt: number;
 }
 
+export interface HighlightRange {
+  startChar: number;
+  endChar: number;
+  pageNumber?: number;
+}
+
 interface DocumentPreviewProps {
   document: Document | null;
   onClose: () => void;
   onReprocess?: (documentId: string) => void;
+  highlightRange?: HighlightRange;
 }
 
 export function DocumentPreview({
   document,
   onClose,
   onReprocess,
+  highlightRange,
 }: DocumentPreviewProps) {
   const modalRef = React.useRef<HTMLDivElement>(null);
+  const highlightRef = React.useRef<HTMLElement>(null);
+  const contentRef = React.useRef<HTMLDivElement>(null);
   const [isReprocessing, setIsReprocessing] = React.useState(false);
+
+  // Scroll to highlight when it changes
+  React.useEffect(() => {
+    if (highlightRange && highlightRef.current) {
+      // Small delay to ensure DOM is ready
+      setTimeout(() => {
+        highlightRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+        });
+      }, 100);
+    }
+  }, [highlightRange, document]);
 
   // Close on escape key
   React.useEffect(() => {
@@ -97,10 +120,20 @@ export function DocumentPreview({
               <h2 className="font-semibold">{document.name}</h2>
               <p className="text-xs text-muted-foreground">
                 Added {formatDate(document.createdAt)}
+                {highlightRange?.pageNumber && (
+                  <span className="ml-2 text-primary">
+                    • Viewing Page {highlightRange.pageNumber}
+                  </span>
+                )}
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {highlightRange && (
+              <span className="rounded-full bg-yellow-100 dark:bg-yellow-900/30 px-2.5 py-0.5 text-xs font-medium text-yellow-700 dark:text-yellow-300">
+                Source highlighted
+              </span>
+            )}
             <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium uppercase">
               {document.type}
             </span>
@@ -126,11 +159,31 @@ export function DocumentPreview({
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div ref={contentRef} className="flex-1 overflow-y-auto p-6">
           {document.content ? (
             <div className="prose prose-sm dark:prose-invert max-w-none">
               <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
-                {document.content}
+                {highlightRange ? (
+                  <>
+                    {document.content.slice(0, highlightRange.startChar)}
+                    <mark
+                      ref={highlightRef}
+                      className="bg-yellow-200 dark:bg-yellow-800/60 px-0.5 rounded animate-pulse"
+                      style={{
+                        animationDuration: "2s",
+                        animationIterationCount: 3,
+                      }}
+                    >
+                      {document.content.slice(
+                        highlightRange.startChar,
+                        highlightRange.endChar
+                      )}
+                    </mark>
+                    {document.content.slice(highlightRange.endChar)}
+                  </>
+                ) : (
+                  document.content
+                )}
               </pre>
             </div>
           ) : (

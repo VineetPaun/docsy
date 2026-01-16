@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as audioOverviews from "../audioOverviews.js";
 import type * as documents from "../documents.js";
 import type * as notebooks from "../notebooks.js";
 import type * as users from "../users.js";
@@ -19,6 +20,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  audioOverviews: typeof audioOverviews;
   documents: typeof documents;
   notebooks: typeof notebooks;
   users: typeof users;

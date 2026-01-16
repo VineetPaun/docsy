@@ -89,7 +89,7 @@ async function synthesizeWithElevenLabs(
 
   // Use a single voice for simplicity and speed
   const voiceId = process.env.ELEVENLABS_VOICE_ID || "21m00Tcm4TlvDq8ikWAM"; // Rachel voice
-  
+
   // Clean up the script - remove speaker labels for narration
   const cleanedText = script
     .split("\n")
@@ -98,7 +98,9 @@ async function synthesizeWithElevenLabs(
     .join(" ")
     .slice(0, 5000); // ElevenLabs has limits
 
-  console.log(`[audio-overview] Synthesizing ${cleanedText.length} characters with ElevenLabs`);
+  console.log(
+    `[audio-overview] Synthesizing ${cleanedText.length} characters with ElevenLabs`
+  );
 
   try {
     const response = await fetch(
@@ -122,7 +124,11 @@ async function synthesizeWithElevenLabs(
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`[audio-overview] ElevenLabs API error:`, response.status, errorText);
+      console.error(
+        `[audio-overview] ElevenLabs API error:`,
+        response.status,
+        errorText
+      );
       return null;
     }
 

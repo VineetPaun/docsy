@@ -1,8 +1,11 @@
 "use client";
 
 import * as React from "react";
+import { useQuery, useMutation } from "convex/react";
+import { api } from "@/convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { ModelSelector } from "@/components/model-selector";
+import { CitationTooltip } from "@/components/citation-tooltip";
 import { DEFAULT_MODEL, isValidModel, type ModelId } from "@/lib/openrouter";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -41,6 +44,7 @@ interface NotebookChatProps {
   documents: Document[] | undefined;
   notebookId: string;
   notebookTitle: string;
+  clerkId: string;
   onCitationClick?: (citation: Citation) => void;
 }
 
@@ -48,9 +52,38 @@ export function NotebookChat({
   documents,
   notebookId,
   notebookTitle,
+  clerkId,
   onCitationClick,
 }: NotebookChatProps) {
-  const [messages, setMessages] = React.useState<Message[]>([]);
+  // Fetch messages from Convex
+  const dbMessages = useQuery(api.messages.getMessages, {
+    notebookId: notebookId as never,
+    clerkId,
+  });
+  const addMessage = useMutation(api.messages.addMessage);
+
+  // Transform DB messages to include parsed citations
+  const messages: Message[] = React.useMemo(() => {
+    if (!dbMessages) return [];
+    return dbMessages.map(
+      (m: {
+        _id: string;
+        role: string;
+        content: string;
+        timestamp: number;
+        sources?: string[];
+        citations?: string;
+      }) => ({
+        id: m._id,
+        role: m.role as "user" | "assistant",
+        content: m.content,
+        timestamp: m.timestamp,
+        sources: m.sources,
+        citations: m.citations ? JSON.parse(m.citations) : undefined,
+      }),
+    );
+  }, [dbMessages]);
+
   const [input, setInput] = React.useState("");
   const [isLoading, setIsLoading] = React.useState(false);
   const [selectedModel, setSelectedModel] =
@@ -66,7 +99,7 @@ export function NotebookChat({
     } else if (savedModel) {
       // Clear invalid saved model
       console.warn(
-        `[notebook-chat] Invalid saved model "${savedModel}", resetting to default`
+        `[notebook-chat] Invalid saved model "${savedModel}", resetting to default`,
       );
       localStorage.removeItem("docsy-model");
       setSelectedModel(DEFAULT_MODEL);
@@ -98,14 +131,9 @@ export function NotebookChat({
     e?.preventDefault();
     if (!input.trim() || isLoading) return;
 
-    const userMessage: Message = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: input.trim(),
-      timestamp: Date.now(),
-    };
+    const userContent = input.trim();
+    const userTimestamp = Date.now();
 
-    setMessages((prev) => [...prev, userMessage]);
     setInput("");
     if (inputRef.current) {
       inputRef.current.style.height = "auto";
@@ -113,15 +141,26 @@ export function NotebookChat({
     setIsLoading(true);
 
     try {
+      // Save user message to database
+      await addMessage({
+        notebookId: notebookId as never,
+        clerkId,
+        role: "user",
+        content: userContent,
+        timestamp: userTimestamp,
+      });
+
       // Call the chat API
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: [...messages, userMessage].map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
+          messages: [...messages, { role: "user", content: userContent }].map(
+            (m) => ({
+              role: m.role,
+              content: m.content,
+            }),
+          ),
           documents: (documents || []).map((d) => ({
             id: d._id,
             name: d.name,
@@ -141,25 +180,26 @@ export function NotebookChat({
 
       const data = await response.json();
 
-      const assistantMessage: Message = {
-        id: crypto.randomUUID(),
+      // Save assistant message to database
+      await addMessage({
+        notebookId: notebookId as never,
+        clerkId,
         role: "assistant",
         content: data.message,
         timestamp: Date.now(),
         sources: data.sources,
-        citations: data.citations || [],
-      };
-
-      setMessages((prev) => [...prev, assistantMessage]);
+        citations: data.citations ? JSON.stringify(data.citations) : undefined,
+      });
     } catch (error) {
       console.error("Chat error:", error);
-      const errorMessage: Message = {
-        id: crypto.randomUUID(),
+      // Save error message to database
+      await addMessage({
+        notebookId: notebookId as never,
+        clerkId,
         role: "assistant",
         content: `Sorry, I encountered an error: ${error instanceof Error ? error.message : "Unknown error"}. Please try again.`,
         timestamp: Date.now(),
-      };
-      setMessages((prev) => [...prev, errorMessage]);
+      });
     } finally {
       setIsLoading(false);
     }
@@ -197,14 +237,15 @@ export function NotebookChat({
 
       if (citation && onCitationClick) {
         parts.push(
-          <button
+          <CitationTooltip
             key={`citation-${match.index}`}
+            citationNumber={citationNum}
+            documentName={citation.documentName}
+            content={citation.content}
+            pageNumber={citation.pageNumber}
+            score={citation.score}
             onClick={() => onCitationClick(citation)}
-            className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 mx-0.5 text-xs font-medium bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors cursor-pointer"
-            title={`From "${citation.documentName}"${citation.pageNumber ? ` (Page ${citation.pageNumber})` : ""} - Click to view source`}
-          >
-            {citationNum}
-          </button>
+          />,
         );
       } else {
         parts.push(
@@ -213,7 +254,7 @@ export function NotebookChat({
             className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 mx-0.5 text-xs font-medium bg-muted text-muted-foreground rounded"
           >
             {citationNum}
-          </span>
+          </span>,
         );
       }
 
@@ -348,7 +389,7 @@ export function NotebookChat({
                         e.dataTransfer.setData("text/plain", message.content);
                         e.dataTransfer.setData(
                           "application/docsy-chat",
-                          "true"
+                          "true",
                         );
                         e.dataTransfer.effectAllowed = "copy";
                       }
@@ -370,7 +411,7 @@ export function NotebookChat({
                                   if (typeof child === "string") {
                                     return renderWithCitations(
                                       child,
-                                      message.citations
+                                      message.citations,
                                     );
                                   }
                                   return child;
@@ -393,7 +434,7 @@ export function NotebookChat({
                                   if (typeof child === "string") {
                                     return renderWithCitations(
                                       child,
-                                      message.citations
+                                      message.citations,
                                     );
                                   }
                                   return child;
@@ -421,7 +462,7 @@ export function NotebookChat({
                                   if (typeof child === "string") {
                                     return renderWithCitations(
                                       child,
-                                      message.citations
+                                      message.citations,
                                     );
                                   }
                                   return child;
@@ -434,7 +475,7 @@ export function NotebookChat({
                                   if (typeof child === "string") {
                                     return renderWithCitations(
                                       child,
-                                      message.citations
+                                      message.citations,
                                     );
                                   }
                                   return child;
@@ -450,7 +491,7 @@ export function NotebookChat({
                               ...props
                             }) => {
                               const match = /language-(\w+)/.exec(
-                                className || ""
+                                className || "",
                               );
                               const isInline =
                                 !match && !String(children).includes("\n");
@@ -474,6 +515,48 @@ export function NotebookChat({
                               <pre className="m-0 bg-transparent">
                                 {children}
                               </pre>
+                            ),
+                            table: ({ children }) => (
+                              <div className="my-2 w-full overflow-y-auto rounded-lg border border-border">
+                                <table className="w-full border-collapse text-sm">
+                                  {children}
+                                </table>
+                              </div>
+                            ),
+                            thead: ({ children }) => (
+                              <thead className="bg-muted/50">{children}</thead>
+                            ),
+                            tbody: ({ children }) => <tbody>{children}</tbody>,
+                            tr: ({ children }) => (
+                              <tr className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
+                                {children}
+                              </tr>
+                            ),
+                            th: ({ children }) => (
+                              <th className="border-r border-border px-4 py-2 text-left font-medium last:border-0">
+                                {React.Children.map(children, (child) => {
+                                  if (typeof child === "string") {
+                                    return renderWithCitations(
+                                      child,
+                                      message.citations,
+                                    );
+                                  }
+                                  return child;
+                                })}
+                              </th>
+                            ),
+                            td: ({ children }) => (
+                              <td className="border-r border-border px-4 py-2 text-left last:border-0 align-top">
+                                {React.Children.map(children, (child) => {
+                                  if (typeof child === "string") {
+                                    return renderWithCitations(
+                                      child,
+                                      message.citations,
+                                    );
+                                  }
+                                  return child;
+                                })}
+                              </td>
                             ),
                           }}
                         >

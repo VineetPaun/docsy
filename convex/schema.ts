@@ -57,4 +57,17 @@ export default defineSchema({
   })
     .index("by_notebook", ["notebookId"])
     .index("by_user", ["userId"]),
+
+  // Chat messages for notebook conversations
+  messages: defineTable({
+    notebookId: v.id("notebooks"),
+    userId: v.id("users"),
+    role: v.string(), // "user" | "assistant"
+    content: v.string(),
+    timestamp: v.number(),
+    sources: v.optional(v.array(v.string())),
+    citations: v.optional(v.string()), // JSON string of Citation[]
+  })
+    .index("by_notebook", ["notebookId"])
+    .index("by_user", ["userId"]),
 });

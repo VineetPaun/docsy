@@ -6,11 +6,12 @@
 
 - **📚 Notebook-based Workflow**: Organize your research into separate notebooks.
 - **💬 Chat with Documents**: Ask questions across multiple documents simultaneously.
+- **💾 Persistent Conversations**: Chat history is automatically saved to the database, so you never lose your context.
+- **🤖 Advanced Model Selection**: Choose from **20+ top-tier AI models** (Gemini, Llama 3, Claude 3.5, DeepSeek, etc.) including many **free options**.
 - **📄 Multi-Format Support**:
   - PDF (`.pdf`)
   - Word (`.docx`, `.doc`)
   - Text & Markdown (`.txt`, `.md`)
-- **🌐 Web Search Integration**: Enrich your research with real-time web results alongside your private documents.
 - **🔍 Vector Search**: Semantic search ensures the AI finds the most relevant context.
 - **⚡ Real-time Updates**: Built on Convex for instant syncing across devices.
 - **🔐 Secure Authentication**: Integrated with Clerk for robust user management.
@@ -22,8 +23,7 @@
 - **Authentication**: [Clerk](https://clerk.com/)
 - **Styling**: [Tailwind CSS](https://tailwindcss.com/)
 - **UI Components**: [shadcn/ui](https://ui.shadcn.com/)
-- **Vector Store**: Qdrant / Convex Vector Search
-- **AI Models**: Integration with OpenAI/Anthropic via OpenRouter (planned)
+- **AI Models**: [OpenRouter](https://openrouter.ai/) (Gemini, Meta, Anthropic, Mistral, etc.)
 
 ## 🚀 Getting Started
 
@@ -59,7 +59,6 @@ CLERK_SECRET_KEY=your_clerk_secret_key
 
 # AI & Search (Add your API keys)
 OPENROUTER_API_KEY=your_openrouter_key
-TAVILY_API_KEY=your_tavily_key
 ```
 
 ### 4. Run the Development Server
@@ -71,11 +70,3 @@ bun dev
 ```
 
 Visit `http://localhost:3000` to see the app.
-
-## 🗺️ Roadmap & Future Features
-
-- [ ] **Audio Overviews**: Generate "podcast-style" summaries of your notebooks.
-- [ ] **Smart Citations**: Clickable citations that highlight the source text.
-- [ ] **YouTube Support**: Add video transcripts as sources.
-- [ ] **Knowledge Graph**: Visualize connections between your documents.
-- [ ] **Collaborative Notebooks**: Share and edit with team members.

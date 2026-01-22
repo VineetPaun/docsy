@@ -10,6 +10,7 @@
 
 import type * as audioOverviews from "../audioOverviews.js";
 import type * as documents from "../documents.js";
+import type * as messages from "../messages.js";
 import type * as notebooks from "../notebooks.js";
 import type * as users from "../users.js";
 
@@ -22,6 +23,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   audioOverviews: typeof audioOverviews;
   documents: typeof documents;
+  messages: typeof messages;
   notebooks: typeof notebooks;
   users: typeof users;
 }>;

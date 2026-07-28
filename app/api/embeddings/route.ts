@@ -7,6 +7,7 @@ import {
   type DocumentChunk,
 } from "@/lib/qdrant";
 import { randomUUID } from "crypto";
+import { requireApiAuth } from "@/lib/api-auth";
 
 interface EmbeddingsRequest {
   documentId: string;
@@ -15,17 +16,19 @@ interface EmbeddingsRequest {
   documentName?: string;
 }
 
+// A long document fans out into many batched Gemini embedding calls.
+export const maxDuration = 300;
+
 export async function POST(request: NextRequest) {
+  // Anonymous callers could previously poison any notebook's vector index.
+  const { errorResponse } = await requireApiAuth();
+  if (errorResponse) return errorResponse;
+
   try {
     const body: EmbeddingsRequest = await request.json();
     const { documentId, notebookId, content, documentName } = body;
 
-    console.log(
-      `[embeddings] Request received - documentId: ${documentId}, notebookId: ${notebookId}, content length: ${content?.length || 0}`
-    );
-
     if (!documentId || !notebookId || !content) {
-      console.error(`[embeddings] Missing required fields`);
       return NextResponse.json(
         { error: "Missing required fields: documentId, notebookId, content" },
         { status: 400 }
@@ -35,16 +38,12 @@ export async function POST(request: NextRequest) {
     // Check for API key
     const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      console.error(`[embeddings] No API key configured`);
       return NextResponse.json(
         { error: "GOOGLE_API_KEY or GEMINI_API_KEY not configured" },
         { status: 500 }
       );
     }
 
-    console.log(
-      `[embeddings] Deleting existing chunks for document: ${documentId}`
-    );
     // Delete existing chunks for this document (in case of re-processing)
     await deleteDocumentChunks(documentId);
 
@@ -54,12 +53,7 @@ export async function POST(request: NextRequest) {
       overlap: 200,
     });
 
-    console.log(
-      `[embeddings] Created ${textChunksWithPositions.length} chunks from content`
-    );
-
     if (textChunksWithPositions.length === 0) {
-      console.log(`[embeddings] No content to embed`);
       return NextResponse.json({
         success: true,
         message: "No content to embed",
@@ -69,12 +63,8 @@ export async function POST(request: NextRequest) {
 
     const textChunks = textChunksWithPositions.map((c) => c.text);
 
-    console.log(
-      `[embeddings] Generating embeddings for ${textChunks.length} chunks`
-    );
     // Generate embeddings for all chunks
     const embeddings = await generateEmbeddings(textChunks);
-    console.log(`[embeddings] Generated ${embeddings.length} embeddings`);
 
     // Create document chunks with metadata including positions
     const chunks: DocumentChunk[] = textChunksWithPositions.map(
@@ -94,20 +84,15 @@ export async function POST(request: NextRequest) {
       })
     );
 
-    console.log(`[embeddings] Storing ${chunks.length} chunks in Qdrant`);
     // Store in Qdrant
     await storeChunks(chunks, embeddings);
-    console.log(
-      `[embeddings] Successfully stored chunks for document: ${documentName}`
-    );
 
     return NextResponse.json({
       success: true,
       chunksStored: chunks.length,
       documentId,
     });
-  } catch (error) {
-    console.error("[embeddings] API error:", error);
+  } catch {
     return NextResponse.json(
       { error: "Failed to generate embeddings" },
       { status: 500 }
@@ -117,6 +102,10 @@ export async function POST(request: NextRequest) {
 
 // DELETE endpoint to remove document embeddings
 export async function DELETE(request: NextRequest) {
+  // Without this, `DELETE ?documentId=X` wiped any user's vectors.
+  const { errorResponse } = await requireApiAuth();
+  if (errorResponse) return errorResponse;
+
   try {
     const { searchParams } = new URL(request.url);
     const documentId = searchParams.get("documentId");
@@ -134,8 +123,7 @@ export async function DELETE(request: NextRequest) {
       success: true,
       message: `Deleted embeddings for document ${documentId}`,
     });
-  } catch (error) {
-    console.error("Delete embeddings error:", error);
+  } catch {
     return NextResponse.json(
       { error: "Failed to delete embeddings" },
       { status: 500 }

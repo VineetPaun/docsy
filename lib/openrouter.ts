@@ -290,14 +290,6 @@ export async function chatWithOpenRouter(
   // Validate model ID - fall back to default if invalid
   const validModel = isValidModel(model) ? model : DEFAULT_MODEL;
 
-  if (model !== validModel) {
-    console.warn(
-      `[openrouter] Invalid model "${model}", falling back to "${validModel}"`,
-    );
-  }
-
-  console.log(`[openrouter] Sending request with model: ${validModel}`);
-
   const response = await fetch(
     "https://openrouter.ai/api/v1/chat/completions",
     {
@@ -320,7 +312,6 @@ export async function chatWithOpenRouter(
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error("[openrouter] API error:", response.status, errorText);
 
     try {
       const errorJson = JSON.parse(errorText);
@@ -350,11 +341,6 @@ export async function chatWithOpenRouter(
     !Array.isArray(data.choices) ||
     data.choices.length === 0
   ) {
-    console.error(
-      "[openrouter] Unexpected API response:",
-      JSON.stringify(data).slice(0, 500),
-    );
-
     if (data?.error) {
       throw new Error(
         `OpenRouter error: ${data.error.message || JSON.stringify(data.error)}`,
@@ -366,11 +352,5 @@ export async function chatWithOpenRouter(
     );
   }
 
-  const content = data.choices[0]?.message?.content || "";
-
-  console.log(
-    `[openrouter] Response received, length: ${content.length} chars`,
-  );
-
-  return content;
+  return data.choices[0]?.message?.content || "";
 }

@@ -55,8 +55,7 @@ export function DocumentDropzone() {
 
       const data = await response.json();
       return data.content || "";
-    } catch (error) {
-      console.error("Document processing error:", error);
+    } catch {
       return "";
     }
   };
@@ -122,13 +121,14 @@ export function DocumentDropzone() {
             content,
             documentName: file.name,
           }),
-        }).catch((err) => console.error("Embedding trigger error:", err));
+        }).catch(() => {
+          // Non-fatal: the notebook still opens, just without vectors yet.
+        });
       }
 
       setStatus("Done! Redirecting...");
       router.push(`/notebook/${notebookId}`);
-    } catch (error) {
-      console.error("Dropzone error:", error);
+    } catch {
       setStatus("Something went wrong. Please try again.");
       setIsProcessing(false);
     }

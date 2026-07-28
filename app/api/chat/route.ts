@@ -7,6 +7,14 @@ import {
 } from "@/lib/openrouter";
 import { generateEmbedding } from "@/lib/embeddings";
 import { searchChunks, type SearchResult } from "@/lib/qdrant";
+import { requireApiAuth } from "@/lib/api-auth";
+
+// Free-tier models on OpenRouter run as low as a 32k context. The system
+// prompt, the retrieved chunks and the conversation history all share it, so
+// each part is bounded independently rather than trusting the client.
+const MAX_HISTORY_MESSAGES = 20; // ~10 turns
+const MAX_HISTORY_CHARS = 24_000;
+const MAX_FALLBACK_CONTEXT_CHARS = 30_000;
 
 // Citation interface for structured source references
 export interface Citation {
@@ -29,7 +37,36 @@ interface ChatRequest {
   useRAG?: boolean;
 }
 
+// Embedding + retrieval + a slow free-tier model routinely exceeds Vercel's
+// default serverless cutoff.
+export const maxDuration = 120;
+
+// Keep only the most recent turns, newest-first, under both a message count
+// and a character budget. Older turns are dropped rather than truncated so a
+// long conversation can never overflow the model's context window.
+function trimHistory(
+  messages: { role: "user" | "assistant"; content: string }[]
+): { role: "user" | "assistant"; content: string }[] {
+  const recent = messages.slice(-MAX_HISTORY_MESSAGES);
+  const kept: typeof recent = [];
+  let budget = MAX_HISTORY_CHARS;
+
+  for (let i = recent.length - 1; i >= 0; i--) {
+    const cost = recent[i].content.length;
+    // Always keep the latest message, even if it alone blows the budget.
+    if (budget - cost < 0 && kept.length > 0) break;
+    budget -= cost;
+    kept.unshift(recent[i]);
+  }
+
+  return kept;
+}
+
 export async function POST(request: NextRequest) {
+  // Reject anonymous callers — this route proxies a paid LLM gateway.
+  const { errorResponse } = await requireApiAuth();
+  if (errorResponse) return errorResponse;
+
   try {
     const body: ChatRequest = await request.json();
     const {
@@ -41,22 +78,8 @@ export async function POST(request: NextRequest) {
       useRAG = true,
     } = body;
 
-    console.log(
-      `[chat] Request received - notebookId: ${notebookId}, documents: ${documents.length}, useRAG: ${useRAG}, model: ${model}`
-    );
-    documents.forEach((doc, i) => {
-      console.log(
-        `[chat] Document ${i + 1}: ${doc.name}, content length: ${doc.content?.length || 0}`
-      );
-    });
-
     // Validate model - use isValidModel helper
     const selectedModel = isValidModel(model) ? model : DEFAULT_MODEL;
-    if (model !== selectedModel) {
-      console.warn(
-        `[chat] Invalid model "${model}" requested, using "${selectedModel}"`
-      );
-    }
 
     // Get the latest user message
     const userMessage = messages[messages.length - 1]?.content || "";
@@ -71,21 +94,12 @@ export async function POST(request: NextRequest) {
       process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
     const hasQdrant = process.env.QDRANT_URL;
 
-    console.log(
-      `[chat] RAG config - hasEmbeddingApi: ${!!hasEmbeddingApi}, hasQdrant: ${!!hasQdrant}`
-    );
-
     if (useRAG && notebookId && hasEmbeddingApi && hasQdrant) {
       try {
-        console.log(
-          `[chat] Performing RAG search for query: "${userMessage.substring(0, 50)}..."`
-        );
         const queryEmbedding = await generateEmbedding(userMessage);
         ragResults = await searchChunks(queryEmbedding, notebookId, {
           limit: 5,
         });
-
-        console.log(`[chat] RAG search returned ${ragResults.length} results`);
 
         if (ragResults.length > 0) {
           documentContext = ragResults
@@ -94,12 +108,8 @@ export async function POST(request: NextRequest) {
                 `[${i + 1}] From "${r.documentName || "Unknown"}"${r.pageNumber ? ` (Page ${r.pageNumber})` : ""} (Score: ${r.score.toFixed(2)})\n${r.content}`
             )
             .join("\n\n---\n\n");
-          console.log(
-            `[chat] RAG context length: ${documentContext.length} chars`
-          );
         }
-      } catch (error) {
-        console.error("[chat] RAG search error:", error);
+      } catch {
         // Fall back to full document context
       }
     }
@@ -116,16 +126,26 @@ export async function POST(request: NextRequest) {
       score: r.score,
     }));
 
-    // If RAG didn't return results, use full document content
+    // If RAG returned nothing (no vectors yet, or nothing cleared the score
+    // floor), fall back to raw document text — but under a hard character
+    // budget. Unbounded stuffing here was a guaranteed context overflow.
     if (!documentContext) {
-      console.log(`[chat] Using fallback document context`);
-      documentContext = documents
-        .filter((doc) => doc.content && doc.content.length > 0)
-        .map((doc) => `=== ${doc.name} ===\n${doc.content}`)
-        .join("\n\n---\n\n");
-      console.log(
-        `[chat] Fallback context from ${documents.filter((d) => d.content && d.content.length > 0).length} docs, length: ${documentContext.length} chars`
-      );
+      let remaining = MAX_FALLBACK_CONTEXT_CHARS;
+      const parts: string[] = [];
+
+      for (const doc of documents) {
+        if (!doc.content || doc.content.length === 0) continue;
+        if (remaining <= 0) break;
+
+        const body = doc.content.slice(0, remaining);
+        const truncated = body.length < doc.content.length;
+        parts.push(
+          `=== ${doc.name} ===\n${body}${truncated ? "\n[…truncated]" : ""}`
+        );
+        remaining -= body.length;
+      }
+
+      documentContext = parts.join("\n\n---\n\n");
     }
 
     // Build system prompt with citation instructions
@@ -161,7 +181,7 @@ INSTRUCTIONS:
       // Use OpenRouter
       const chatMessages: ChatMessage[] = [
         { role: "system", content: systemPrompt },
-        ...messages.map((m) => ({
+        ...trimHistory(messages).map((m) => ({
           role: m.role as "user" | "assistant",
           content: m.content,
         })),
@@ -187,87 +207,6 @@ INSTRUCTIONS:
       });
     }
 
-    // Fallback: Check for legacy API keys (OpenAI, Anthropic)
-    const openaiKey = process.env.OPENAI_API_KEY;
-    const anthropicKey = process.env.ANTHROPIC_API_KEY;
-
-    if (openaiKey) {
-      const response = await fetch(
-        "https://api.openai.com/v1/chat/completions",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${openaiKey}`,
-          },
-          body: JSON.stringify({
-            model: "gpt-4o-mini",
-            messages: [
-              { role: "system", content: systemPrompt },
-              ...messages.map((m) => ({
-                role: m.role as "user" | "assistant",
-                content: m.content,
-              })),
-            ],
-            temperature: 0.7,
-            max_tokens: 1000,
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        const error = await response.text();
-        console.error("OpenAI API error:", error);
-        throw new Error("Failed to get response from OpenAI");
-      }
-
-      const data = await response.json();
-      const assistantMessage =
-        data.choices[0]?.message?.content || "No response generated.";
-
-      return NextResponse.json({
-        message: assistantMessage,
-        sources: documents.slice(0, 3).map((d) => d.name),
-        citations,
-        model: "openai/gpt-4o-mini",
-      });
-    } else if (anthropicKey) {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": anthropicKey,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify({
-          model: "claude-3-haiku-20240307",
-          max_tokens: 1000,
-          system: systemPrompt,
-          messages: messages.map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
-        }),
-      });
-
-      if (!response.ok) {
-        const error = await response.text();
-        console.error("Anthropic API error:", error);
-        throw new Error("Failed to get response from Anthropic");
-      }
-
-      const data = await response.json();
-      const assistantMessage =
-        data.content[0]?.text || "No response generated.";
-
-      return NextResponse.json({
-        message: assistantMessage,
-        sources: documents.slice(0, 3).map((d) => d.name),
-        citations,
-        model: "anthropic/claude-3-haiku",
-      });
-    }
-
     // No API key configured - return demo response
     return NextResponse.json({
       message: generateDemoResponse(userMessage, documents, notebookTitle),
@@ -276,12 +215,11 @@ INSTRUCTIONS:
       isDemo: true,
       model: "demo",
     });
-  } catch (error) {
-    console.error("Chat API error:", error);
-    const errorMessage =
-      error instanceof Error ? error.message : "Unknown error";
+  } catch {
+    // Internal error details stay server-side — they leaked upstream API
+    // messages to the client before (AUDIT.md §6.5).
     return NextResponse.json(
-      { error: `Failed to process chat request: ${errorMessage}` },
+      { error: "Failed to process chat request" },
       { status: 500 }
     );
   }

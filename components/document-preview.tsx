@@ -20,20 +20,17 @@ export interface HighlightRange {
 interface DocumentPreviewProps {
   document: Document | null;
   onClose: () => void;
-  onReprocess?: (documentId: string) => void;
   highlightRange?: HighlightRange;
 }
 
 export function DocumentPreview({
   document,
   onClose,
-  onReprocess,
   highlightRange,
 }: DocumentPreviewProps) {
   const modalRef = React.useRef<HTMLDivElement>(null);
   const highlightRef = React.useRef<HTMLElement>(null);
   const contentRef = React.useRef<HTMLDivElement>(null);
-  const [isReprocessing, setIsReprocessing] = React.useState(false);
 
   // Scroll to highlight when it changes
   React.useEffect(() => {
@@ -211,22 +208,6 @@ export function DocumentPreview({
                 The content for this document hasn&apos;t been extracted yet or
                 the file format isn&apos;t supported for preview.
               </p>
-              {onReprocess && document.storageId && (
-                <button
-                  onClick={async () => {
-                    setIsReprocessing(true);
-                    try {
-                      await onReprocess(document._id);
-                    } finally {
-                      setIsReprocessing(false);
-                    }
-                  }}
-                  disabled={isReprocessing}
-                  className="mt-4 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
-                >
-                  {isReprocessing ? "Reprocessing..." : "Reprocess Document"}
-                </button>
-              )}
             </div>
           )}
         </div>

@@ -37,7 +37,6 @@ export default function SignInPage() {
         router.push("/dashboard");
       } else {
         // Handle other statuses (e.g., needs_first_factor, needs_second_factor)
-        console.log("Sign in status:", result.status);
         setError("Additional verification required. Please try again.");
       }
     } catch (err: unknown) {

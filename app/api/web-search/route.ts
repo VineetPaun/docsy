@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireApiAuth } from "@/lib/api-auth";
 
 interface WebSearchRequest {
   query: string;
@@ -13,6 +14,10 @@ interface SearchResult {
 }
 
 export async function POST(request: NextRequest) {
+  // Was a free anonymous proxy onto the Tavily/Serper keys.
+  const { errorResponse } = await requireApiAuth();
+  if (errorResponse) return errorResponse;
+
   try {
     const body: WebSearchRequest = await request.json();
     const { query, limit = 5 } = body;
@@ -41,8 +46,7 @@ export async function POST(request: NextRequest) {
       isDemo: true,
       message: "Web search requires TAVILY_API_KEY or SERPER_API_KEY",
     });
-  } catch (error) {
-    console.error("Web search API error:", error);
+  } catch {
     return NextResponse.json(
       { error: "Failed to perform web search" },
       { status: 500 }
@@ -70,8 +74,6 @@ async function searchWithTavily(
   });
 
   if (!response.ok) {
-    const error = await response.text();
-    console.error("Tavily API error:", error);
     throw new Error("Failed to search with Tavily");
   }
 
@@ -114,8 +116,6 @@ async function searchWithSerper(
   });
 
   if (!response.ok) {
-    const error = await response.text();
-    console.error("Serper API error:", error);
     throw new Error("Failed to search with Serper");
   }
 

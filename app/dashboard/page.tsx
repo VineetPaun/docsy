@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { UserSync } from "@/components/user-sync";
 import { useConvexAvailable } from "@/components/providers/convex-provider";
-import { mockNotebooks } from "@/hooks/use-convex-status";
+import { mockNotebooks } from "@/lib/mock-data";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -72,8 +72,8 @@ export default function DashboardPage() {
         });
         setNewTitle("");
         setIsCreating(false);
-      } catch (error) {
-        console.error("Failed to create notebook:", error);
+      } catch {
+        toast.error("Failed to create notebook");
       }
     } else {
       // Mock create
@@ -100,8 +100,7 @@ export default function DashboardPage() {
           notebookId: notebookId as never,
         });
         toast.success("Notebook deleted");
-      } catch (error) {
-        console.error("Failed to delete notebook:", error);
+      } catch {
         toast.error("Failed to delete notebook");
       }
     } else {

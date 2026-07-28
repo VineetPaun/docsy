@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { chatWithOpenRouter, DEFAULT_MODEL, type ModelId } from "@/lib/openrouter";
+import { requireApiAuth } from "@/lib/api-auth";
 
 interface ResearchRequest {
   topic: string;
@@ -13,7 +14,14 @@ interface ResearchSource {
   snippet: string;
 }
 
+// Two LLM calls plus a fan-out of web searches; well past the default cutoff.
+export const maxDuration = 300;
+
 export async function POST(request: NextRequest) {
+  // Each call fans out to 3 web searches + 2 LLM calls — expensive to leave open.
+  const { errorResponse } = await requireApiAuth();
+  if (errorResponse) return errorResponse;
+
   try {
     const body: ResearchRequest = await request.json();
     const { topic, depth = "standard", model = DEFAULT_MODEL } = body;
@@ -46,32 +54,42 @@ export async function POST(request: NextRequest) {
     const allSources: ResearchSource[] = [];
 
     if (tavilyKey || serperKey) {
-      for (const query of searchQueries.slice(0, 3)) {
-        try {
+      // Run the sub-searches concurrently — awaiting them in a loop made
+      // research take as long as the sum of every upstream call.
+      const searches = await Promise.allSettled(
+        searchQueries.slice(0, 3).map(async (query) => {
           const searchResponse = await fetch(
             new URL("/api/web-search", request.url).toString(),
             {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              // /api/web-search now requires a session, so the caller's
+              // credentials must ride along on this internal hop —
+              // otherwise it 401s and research silently finds no sources.
+              headers: {
+                "Content-Type": "application/json",
+                cookie: request.headers.get("cookie") ?? "",
+                authorization: request.headers.get("authorization") ?? "",
+              },
               body: JSON.stringify({ query, limit: 3 }),
             }
           );
 
-          if (searchResponse.ok) {
-            const data = await searchResponse.json();
-            if (data.results) {
-              allSources.push(
-                ...data.results.map((r: { title: string; url: string; snippet: string }) => ({
-                  title: r.title,
-                  url: r.url,
-                  snippet: r.snippet,
-                }))
-              );
-            }
-          }
-        } catch (error) {
-          console.error("Search error for query:", query, error);
-        }
+          if (!searchResponse.ok) return [];
+
+          const data = await searchResponse.json();
+          return (data.results ?? []).map(
+            (r: { title: string; url: string; snippet: string }) => ({
+              title: r.title,
+              url: r.url,
+              snippet: r.snippet,
+            })
+          ) as ResearchSource[];
+        })
+      );
+
+      // A failed sub-search is non-fatal; keep the sources we did get.
+      for (const search of searches) {
+        if (search.status === "fulfilled") allSources.push(...search.value);
       }
     }
 
@@ -85,8 +103,7 @@ export async function POST(request: NextRequest) {
       sources: allSources.slice(0, 10),
       searchQueries,
     });
-  } catch (error) {
-    console.error("Research API error:", error);
+  } catch {
     return NextResponse.json(
       { error: "Failed to perform research" },
       { status: 500 }

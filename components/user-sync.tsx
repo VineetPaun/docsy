@@ -21,8 +21,8 @@ export function UserSync() {
           lastName: user.lastName ?? undefined,
           imageUrl: user.imageUrl ?? undefined,
         });
-      } catch (error) {
-        console.error("Failed to sync user:", error);
+      } catch {
+        // Sync is retried on the next mount; nothing actionable for the user.
       }
     };
 

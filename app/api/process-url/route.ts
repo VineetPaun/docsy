@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as cheerio from "cheerio";
 import TurndownService from "turndown";
+import { requireApiAuth } from "@/lib/api-auth";
+import {
+  assertPublicUrl,
+  BlockedUrlError,
+  safeFetchText,
+} from "@/lib/url-guard";
 
 interface ProcessUrlRequest {
   url: string;
@@ -37,19 +43,19 @@ function extractYouTubeVideoId(url: string): string | null {
 async function fetchYouTubeTranscript(videoId: string): Promise<string> {
   try {
     // Try using the unofficial transcript API
-    const response = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-      },
-    });
-
-    const html = await response.text();
+    const { text: html } = await safeFetchText(
+      `https://www.youtube.com/watch?v=${videoId}`,
+      {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        },
+      }
+    );
 
     // Extract captions URL from the page
     const captionMatch = html.match(/"captionTracks":\s*(\[.*?\])/);
     if (!captionMatch) {
-      console.log("[process-url] No captions found for video");
       return "";
     }
 
@@ -66,9 +72,9 @@ async function fetchYouTubeTranscript(videoId: string): Promise<string> {
         return "";
       }
 
-      // Fetch the actual transcript
-      const transcriptResponse = await fetch(captionTrack.baseUrl);
-      const transcriptXml = await transcriptResponse.text();
+      // Fetch the actual transcript. `baseUrl` comes out of YouTube's page
+      // markup, so it is untrusted input and goes through the same guard.
+      const { text: transcriptXml } = await safeFetchText(captionTrack.baseUrl);
 
       // Parse XML transcript
       const $ = cheerio.load(transcriptXml, { xmlMode: true });
@@ -83,12 +89,10 @@ async function fetchYouTubeTranscript(videoId: string): Promise<string> {
       });
 
       return lines.join(" ");
-    } catch (parseError) {
-      console.error("[process-url] Failed to parse captions:", parseError);
+    } catch {
       return "";
     }
-  } catch (error) {
-    console.error("[process-url] YouTube transcript error:", error);
+  } catch {
     return "";
   }
 }
@@ -98,15 +102,11 @@ async function fetchYouTubeMetadata(
   videoId: string
 ): Promise<Partial<ProcessedContent>> {
   try {
-    const response = await fetch(
+    const { text } = await safeFetchText(
       `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`
     );
 
-    if (!response.ok) {
-      throw new Error("Failed to fetch video metadata");
-    }
-
-    const data = await response.json();
+    const data = JSON.parse(text);
 
     return {
       title: data.title || "YouTube Video",
@@ -114,8 +114,7 @@ async function fetchYouTubeMetadata(
       thumbnailUrl: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
       siteName: "YouTube",
     };
-  } catch (error) {
-    console.error("[process-url] YouTube metadata error:", error);
+  } catch {
     return {
       title: "YouTube Video",
       thumbnailUrl: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
@@ -125,20 +124,20 @@ async function fetchYouTubeMetadata(
 
 // Process a regular webpage
 async function processWebpage(url: string): Promise<ProcessedContent> {
-  const response = await fetch(url, {
+  // safeFetchText enforces the SSRF, redirect, timeout and size rules.
+  const { text: html } = await safeFetchText(url, {
     headers: {
       "User-Agent": "Mozilla/5.0 (compatible; Docsy/1.0; +https://docsy.app)",
       Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     },
+    allowedContentTypes: [
+      "text/html",
+      "application/xhtml+xml",
+      "text/plain",
+      "text/markdown",
+    ],
   });
 
-  if (!response.ok) {
-    throw new Error(
-      `Failed to fetch URL: ${response.status} ${response.statusText}`
-    );
-  }
-
-  const html = await response.text();
   const $ = cheerio.load(html);
 
   // Remove unwanted elements
@@ -274,6 +273,10 @@ async function processYouTube(
 }
 
 export async function POST(request: NextRequest) {
+  // Unauthenticated, this route was an internal-network scanner (AUDIT.md §3.3).
+  const { errorResponse } = await requireApiAuth();
+  if (errorResponse) return errorResponse;
+
   try {
     const body: ProcessUrlRequest = await request.json();
     const { url } = body;
@@ -282,35 +285,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "URL is required" }, { status: 400 });
     }
 
-    // Validate URL
-    let parsedUrl: URL;
-    try {
-      parsedUrl = new URL(url);
-    } catch {
-      return NextResponse.json(
-        { error: "Invalid URL format" },
-        { status: 400 }
-      );
-    }
-
-    console.log(`[process-url] Processing URL: ${url}`);
+    // Reject non-http(s) schemes and private/loopback/link-local targets
+    // before doing any work. Each fetch below re-validates independently,
+    // including after redirects.
+    await assertPublicUrl(url);
 
     // Check if it's a YouTube URL
     const videoId = extractYouTubeVideoId(url);
 
-    let result: ProcessedContent;
-
-    if (videoId) {
-      console.log(`[process-url] Detected YouTube video: ${videoId}`);
-      result = await processYouTube(url, videoId);
-    } else {
-      console.log(`[process-url] Processing as webpage: ${parsedUrl.hostname}`);
-      result = await processWebpage(url);
-    }
-
-    console.log(
-      `[process-url] Successfully processed: ${result.title} (${result.content.length} chars)`
-    );
+    const result: ProcessedContent = videoId
+      ? await processYouTube(url, videoId)
+      : await processWebpage(url);
 
     return NextResponse.json({
       success: true,
@@ -319,11 +304,14 @@ export async function POST(request: NextRequest) {
       characterCount: result.content.length,
     });
   } catch (error) {
-    console.error("[process-url] Error:", error);
-    const errorMessage =
-      error instanceof Error ? error.message : "Unknown error";
+    // Blocked URLs are the caller's fault — tell them why. Everything else
+    // gets a generic message so internal details stay server-side.
+    if (error instanceof BlockedUrlError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+
     return NextResponse.json(
-      { error: `Failed to process URL: ${errorMessage}` },
+      { error: "Failed to process URL" },
       { status: 500 }
     );
   }

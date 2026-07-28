@@ -99,6 +99,11 @@ export async function storeChunks(
   });
 }
 
+// Minimum cosine similarity a chunk must reach to be treated as relevant.
+// Below this the model still dutifully cites whatever it is handed, so a
+// floor here is what stops irrelevant passages appearing as citations.
+export const DEFAULT_SCORE_THRESHOLD = 0.5;
+
 // Search for similar chunks
 export async function searchChunks(
   embedding: number[],
@@ -106,6 +111,7 @@ export async function searchChunks(
   options?: {
     limit?: number;
     documentIds?: string[];
+    scoreThreshold?: number;
   }
 ): Promise<SearchResult[]> {
   const client = getQdrantClient();
@@ -126,6 +132,8 @@ export async function searchChunks(
     vector: embedding,
     filter,
     limit: options?.limit ?? 10,
+    // Filtered server-side by Qdrant so weak matches never cross the wire.
+    score_threshold: options?.scoreThreshold ?? DEFAULT_SCORE_THRESHOLD,
     with_payload: true,
   });
 
@@ -174,13 +182,6 @@ export interface ChunkWithPosition {
   pageNumber?: number;
 }
 
-export function chunkText(
-  text: string,
-  options?: { chunkSize?: number; overlap?: number }
-): string[] {
-  return chunkTextWithPositions(text, options).map((chunk) => chunk.text);
-}
-
 export function chunkTextWithPositions(
   text: string,
   options?: { chunkSize?: number; overlap?: number }
@@ -209,23 +210,23 @@ export function chunkTextWithPositions(
     }
   }
 
+  // Chunks are emitted in ascending `start` order, so the page cursor only
+  // ever moves forward. Advancing it in place keeps this O(n + m) instead of
+  // rescanning the whole pageBreaks array for every chunk.
+  let pageCursor = 0;
   const getPageNumber = (charIndex: number): number => {
-    let page = 1;
-    for (const breakPoint of pageBreaks) {
-      if (charIndex > breakPoint) {
-        page++;
-      } else {
-        break;
-      }
+    while (pageCursor < pageBreaks.length && charIndex > pageBreaks[pageCursor]) {
+      pageCursor++;
     }
-    return page;
+    return pageCursor + 1;
   };
 
   const chunks: ChunkWithPosition[] = [];
   let start = 0;
 
   while (start < text.length) {
-    let end = start + chunkSize;
+    // Clamp so the final chunk can never record an endChar past the text.
+    let end = Math.min(start + chunkSize, text.length);
 
     // Try to break at sentence boundary
     if (end < text.length) {
@@ -238,17 +239,27 @@ export function chunkTextWithPositions(
       }
     }
 
-    const chunkText = text.slice(start, end).trim();
-    if (chunkText.length > 50) {
+    // Offsets must describe the *trimmed* text that actually gets stored,
+    // otherwise citation highlights drift by the amount trimmed off the front.
+    const rawChunk = text.slice(start, end);
+    const leadingWhitespace = rawChunk.length - rawChunk.trimStart().length;
+    const chunkContent = rawChunk.trim();
+    const chunkStart = start + leadingWhitespace;
+
+    if (chunkContent.length > 50) {
       chunks.push({
-        text: chunkText,
-        startChar: start,
-        endChar: end,
-        pageNumber: pageBreaks.length > 0 ? getPageNumber(start) : undefined,
+        text: chunkContent,
+        startChar: chunkStart,
+        endChar: chunkStart + chunkContent.length,
+        pageNumber:
+          pageBreaks.length > 0 ? getPageNumber(chunkStart) : undefined,
       });
     }
 
-    start = end - overlap;
+    const nextStart = end - overlap;
+    // Guard against a break point that never advances the window.
+    if (nextStart <= start) break;
+    start = nextStart;
   }
 
   return chunks;

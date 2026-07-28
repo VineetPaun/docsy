@@ -14,6 +14,7 @@ import {
   DocumentPreview,
   type HighlightRange,
 } from "@/components/document-preview";
+import { toast } from "sonner";
 import * as React from "react";
 
 interface Document {
@@ -78,11 +79,11 @@ export default function NotebookPage() {
         await fetch(`/api/embeddings?documentId=${documentId}`, {
           method: "DELETE",
         });
-      } catch (embedError) {
-        console.error("Failed to delete embeddings (non-fatal):", embedError);
+      } catch {
+        // Non-fatal: the document row is gone, the vectors are orphaned.
       }
-    } catch (error) {
-      console.error("Failed to delete document:", error);
+    } catch {
+      toast.error("Failed to delete source");
     }
   };
 
@@ -95,8 +96,8 @@ export default function NotebookPage() {
         title: editedTitle.trim(),
       });
       setIsEditingTitle(false);
-    } catch (error) {
-      console.error("Failed to update title:", error);
+    } catch {
+      toast.error("Failed to update title");
     }
   };
 

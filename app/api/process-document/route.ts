@@ -1,9 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import mammoth from "mammoth";
-// @ts-expect-error - pdf-parse v1.x doesn't have types
-import pdfParse from "pdf-parse/lib/pdf-parse.js";
+import { PDFParse } from "pdf-parse";
+import { requireApiAuth } from "@/lib/api-auth";
+
+// Matches the "up to 10MB" promise the upload UI makes. The whole file is read
+// into a Buffer below, so an uncapped upload is a memory-exhaustion vector.
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+
+// Parsing a large PDF can outlast the default serverless cutoff.
+export const maxDuration = 120;
 
 export async function POST(request: NextRequest) {
+  // Previously an open door into the PDF parser for anonymous callers.
+  const { errorResponse } = await requireApiAuth();
+  if (errorResponse) return errorResponse;
+
   try {
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
@@ -12,53 +23,35 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
     }
 
-    console.log(
-      `[process-document] Processing file: ${file.name}, type: ${file.type}, size: ${file.size} bytes`
-    );
+    if (file.size > MAX_FILE_BYTES) {
+      return NextResponse.json(
+        { error: "File is too large. Maximum size is 10MB." },
+        { status: 413 }
+      );
+    }
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const fileType = file.type;
     let extractedText = "";
 
     if (fileType === "application/pdf") {
-      // Extract text from PDF using pdf-parse v1
+      // pdf-parse v2: class-based API, real types, and per-page text.
+      // `parser.destroy()` releases the pdf.js worker — skipping it leaks a
+      // worker per request.
+      const parser = new PDFParse({ data: buffer });
       try {
-        console.log(
-          `[process-document] Starting PDF extraction for: ${file.name}`
-        );
-        console.log(`[process-document] Buffer size: ${buffer.length} bytes`);
-
-        const result = await pdfParse(buffer);
-
-        console.log(
-          `[process-document] PDF parsed - pages: ${result.numpages || 0}`
-        );
-
+        const result = await parser.getText();
         extractedText = result.text || "";
 
-        console.log(
-          `[process-document] Text extracted: ${extractedText.length} characters`
-        );
-
         if (!extractedText || extractedText.trim().length === 0) {
-          console.warn(
-            `[process-document] No text extracted from PDF: ${file.name}`
-          );
           extractedText =
             "[PDF content could not be extracted. The PDF may be scanned/image-based or protected.]";
-        } else {
-          console.log(
-            `[process-document] Successfully extracted ${extractedText.length} characters from PDF`
-          );
         }
-      } catch (error) {
-        console.error("[process-document] PDF parsing error:", error);
-        console.error(
-          "[process-document] Error details:",
-          error instanceof Error ? error.message : String(error)
-        );
+      } catch {
         extractedText =
           "[Failed to extract PDF content. Please try a different PDF or convert to text.]";
+      } finally {
+        await parser.destroy();
       }
     } else if (
       fileType ===
@@ -69,8 +62,7 @@ export async function POST(request: NextRequest) {
       try {
         const result = await mammoth.extractRawText({ buffer });
         extractedText = result.value;
-      } catch (error) {
-        console.error("DOCX parsing error:", error);
+      } catch {
         extractedText = "[Failed to extract DOCX content]";
       }
     } else if (fileType === "text/plain" || fileType === "text/markdown") {
@@ -103,8 +95,7 @@ export async function POST(request: NextRequest) {
       fileType: file.type,
       characterCount: extractedText.length,
     });
-  } catch (error) {
-    console.error("Document processing error:", error);
+  } catch {
     return NextResponse.json(
       { error: "Failed to process document" },
       { status: 500 }

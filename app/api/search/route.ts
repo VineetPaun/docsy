@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateEmbedding } from "@/lib/embeddings";
 import { searchChunks } from "@/lib/qdrant";
+import { requireApiAuth } from "@/lib/api-auth";
 
 interface SearchRequest {
   query: string;
@@ -10,6 +11,11 @@ interface SearchRequest {
 }
 
 export async function POST(request: NextRequest) {
+  // TODO (AUDIT.md §3.2): also verify the caller owns `notebookId`. Requires
+  // the Convex auth refactor in §3.1 to be able to trust an ownership lookup.
+  const { errorResponse } = await requireApiAuth();
+  if (errorResponse) return errorResponse;
+
   try {
     const body: SearchRequest = await request.json();
     const { query, notebookId, documentIds, limit = 10 } = body;
@@ -51,8 +57,7 @@ export async function POST(request: NextRequest) {
       })),
       query,
     });
-  } catch (error) {
-    console.error("Search API error:", error);
+  } catch {
     return NextResponse.json(
       { error: "Failed to perform search" },
       { status: 500 }

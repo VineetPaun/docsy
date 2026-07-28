@@ -98,9 +98,6 @@ export function NotebookChat({
       setSelectedModel(savedModel);
     } else if (savedModel) {
       // Clear invalid saved model
-      console.warn(
-        `[notebook-chat] Invalid saved model "${savedModel}", resetting to default`,
-      );
       localStorage.removeItem("docsy-model");
       setSelectedModel(DEFAULT_MODEL);
     }
@@ -174,7 +171,6 @@ export function NotebookChat({
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        console.error("Chat API error:", response.status, errorData);
         throw new Error(errorData.error || `API error: ${response.status}`);
       }
 
@@ -191,7 +187,6 @@ export function NotebookChat({
         citations: data.citations ? JSON.stringify(data.citations) : undefined,
       });
     } catch (error) {
-      console.error("Chat error:", error);
       // Save error message to database
       await addMessage({
         notebookId: notebookId as never,
@@ -485,7 +480,6 @@ export function NotebookChat({
                             code: ({
                               // eslint-disable-next-line @typescript-eslint/no-unused-vars
                               node,
-                              // eslint-disable-next-line @typescript-eslint/no-unused-vars
                               className,
                               children,
                               ...props

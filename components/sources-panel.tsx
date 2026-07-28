@@ -95,52 +95,16 @@ export function SourcesPanel({
     notebookId: notebookId as never,
     clerkId,
   });
-  // const updateDocumentContent = useMutation(
-  //   api.documents.updateDocumentContent
-  // );
-
-  // Function to reprocess a document that has no content
-  const handleReprocessDocument = async (documentId: string) => {
-    const doc = documents?.find((d) => d._id === documentId);
-    if (!doc || !doc.storageId) {
-      console.error("[sources-panel] Cannot reprocess - no storageId");
-      return;
-    }
-
-    console.log(`[sources-panel] Reprocessing document: ${doc.name}`);
-
-    try {
-      // Fetch the file from Convex storage
-      // We need to get the storage URL first
-      // const storageUrl = `/api/convex-storage?storageId=${doc.storageId}`;
-
-      // For now, notify the user to re-upload
-      toast.info(
-        `To reprocess "${doc.name}", please delete it and upload again.`
-      );
-    } catch (error) {
-      console.error("[sources-panel] Reprocess error:", error);
-      toast.error("Failed to reprocess document");
-    }
-  };
-
   const extractTextFromFile = async (file: File): Promise<string> => {
     const type = ACCEPTED_TYPES[file.type as keyof typeof ACCEPTED_TYPES];
 
     // For text files, read directly
     if (type === "txt" || type === "md") {
-      const text = await file.text();
-      console.log(
-        `[sources-panel] Extracted ${text.length} chars from text file: ${file.name}`
-      );
-      return text;
+      return await file.text();
     }
 
     // For PDF and DOCX, use the server-side processing API
     try {
-      console.log(
-        `[sources-panel] Sending ${file.name} (${file.type}) to process-document API`
-      );
       const formData = new FormData();
       formData.append("file", file);
 
@@ -150,24 +114,12 @@ export function SourcesPanel({
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error(
-          `[sources-panel] process-document API error: ${response.status}`,
-          errorText
-        );
         throw new Error("Failed to process document");
       }
 
       const data = await response.json();
-      console.log(
-        `[sources-panel] Received ${data.content?.length || 0} chars from process-document API for: ${file.name}`
-      );
-      console.log(
-        `[sources-panel] Content preview: "${data.content?.substring(0, 100)}..."`
-      );
       return data.content;
-    } catch (error) {
-      console.error("[sources-panel] Document processing error:", error);
+    } catch {
       return `[Failed to extract content from ${file.name}]`;
     }
   };
@@ -180,7 +132,6 @@ export function SourcesPanel({
     setSearchResults([]);
 
     try {
-      console.log(`[sources-panel] Searching web for: "${searchQuery}"`);
       const response = await fetch("/api/web-search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -192,11 +143,9 @@ export function SourcesPanel({
       if (data.success && data.results) {
         setSearchResults(data.results);
       } else {
-        console.error("Web search failed:", data.error || data.message);
         toast.error(`Search failed: ${data.message || "Unknown error"}`);
       }
-    } catch (error) {
-      console.error("Web search error:", error);
+    } catch {
       toast.error("Failed to perform web search");
     } finally {
       setIsSearching(false);
@@ -206,8 +155,6 @@ export function SourcesPanel({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleAddWebResult = async (result: any) => {
     try {
-      console.log(`[sources-panel] Adding web result: ${result.title}`);
-
       // Create content with metadata
       const content = `Source: ${result.url}\nTitle: ${result.title}\nDate: ${new Date().toISOString()}\n\n${result.snippet || ""}`;
 
@@ -220,11 +167,8 @@ export function SourcesPanel({
         // No storageId for web results
       });
 
-      console.log(`[sources-panel] Web document created: ${doc}`);
-
       // Generate embeddings
       if (content && content.length > 50) {
-        console.log(`[sources-panel] Generating embeddings for web result`);
         try {
           await fetch("/api/embeddings", {
             method: "POST",
@@ -236,16 +180,15 @@ export function SourcesPanel({
               documentName: result.title,
             }),
           });
-        } catch (error) {
-          console.error("Embedding error for web result:", error);
+        } catch {
+          // Embedding failure is non-fatal — the source is still stored.
         }
       }
 
       // Remove from search results to indicate added
       setSearchResults((prev) => prev.filter((r) => r.url !== result.url));
       toast.success("Web source added");
-    } catch (error) {
-      console.error("Failed to add web source:", error);
+    } catch {
       toast.error("Failed to add web source");
     }
   };
@@ -266,8 +209,6 @@ export function SourcesPanel({
     setIsProcessingUrl(true);
 
     try {
-      console.log(`[sources-panel] Processing URL: ${urlInput}`);
-
       // Call the process-url API
       const response = await fetch("/api/process-url", {
         method: "POST",
@@ -280,10 +221,6 @@ export function SourcesPanel({
       if (!response.ok || !data.success) {
         throw new Error(data.error || "Failed to process URL");
       }
-
-      console.log(
-        `[sources-panel] URL processed: ${data.title} (${data.characterCount} chars)`
-      );
 
       // Determine the document type based on sourceType
       const isYouTube = data.sourceType === "youtube";
@@ -308,11 +245,8 @@ export function SourcesPanel({
         }),
       });
 
-      console.log(`[sources-panel] URL document created: ${doc}`);
-
       // Generate embeddings for the content
       if (data.content && data.content.length > 50) {
-        console.log(`[sources-panel] Generating embeddings for URL content`);
         try {
           await fetch("/api/embeddings", {
             method: "POST",
@@ -324,8 +258,8 @@ export function SourcesPanel({
               documentName: data.title,
             }),
           });
-        } catch (error) {
-          console.error("Embedding error for URL:", error);
+        } catch {
+          // Embedding failure is non-fatal — the source is still stored.
         }
       }
 
@@ -334,7 +268,6 @@ export function SourcesPanel({
       setShowUrlInput(false);
       toast.success("URL added successfully");
     } catch (error) {
-      console.error("Failed to add URL:", error);
       toast.error(error instanceof Error ? error.message : "Failed to add URL");
     } finally {
       setIsProcessingUrl(false);
@@ -355,10 +288,6 @@ export function SourcesPanel({
     setAudioScript(undefined);
 
     try {
-      console.log(
-        `[sources-panel] Generating audio overview for notebook: ${notebookId}`
-      );
-
       // Create a "generating" record
       await createAudioOverview({
         notebookId: notebookId as never,
@@ -395,10 +324,6 @@ export function SourcesPanel({
         throw new Error(data.error || "Failed to generate audio overview");
       }
 
-      console.log(
-        `[sources-panel] Audio overview generated: ${data.wordCount} words`
-      );
-
       // Update the audio overview record
       await createAudioOverview({
         notebookId: notebookId as never,
@@ -415,8 +340,6 @@ export function SourcesPanel({
       }
       toast.success("Audio overview generated!");
     } catch (error) {
-      console.error("Failed to generate audio overview:", error);
-
       // Update record with error
       await createAudioOverview({
         notebookId: notebookId as never,
@@ -486,10 +409,6 @@ export function SourcesPanel({
           storageId,
         });
 
-        console.log(
-          `[sources-panel] Document created with ID: ${doc}, content stored: ${content?.length || 0} chars`
-        );
-
         // Generate embeddings for the document (in background)
         if (
           content &&
@@ -500,11 +419,8 @@ export function SourcesPanel({
           setUploadProgress(
             `Indexing ${i + 1}/${validFiles.length}: ${file.name}`
           );
-          console.log(
-            `[sources-panel] Starting embeddings generation for: ${file.name}`
-          );
           try {
-            const embedResponse = await fetch("/api/embeddings", {
+            await fetch("/api/embeddings", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -514,25 +430,14 @@ export function SourcesPanel({
                 documentName: file.name,
               }),
             });
-            const embedResult = await embedResponse.json();
-            console.log(`[sources-panel] Embeddings result:`, embedResult);
-          } catch (embedError) {
-            console.error(
-              "[sources-panel] Embedding error (non-fatal):",
-              embedError
-            );
-            // Continue even if embedding fails
+          } catch {
+            // Continue even if embedding fails — the document is stored.
           }
-        } else {
-          console.warn(
-            `[sources-panel] Skipping embeddings - content invalid or too short for: ${file.name}`
-          );
         }
       }
       setUploadProgress("");
       toast.success(`Uploaded ${validFiles.length} file(s) successfully`);
-    } catch (error) {
-      console.error("Upload error:", error);
+    } catch {
       toast.error("Failed to upload some files. Please try again.");
     } finally {
       setIsUploading(false);
@@ -1275,7 +1180,6 @@ export function SourcesPanel({
       <DocumentPreview
         document={previewDoc}
         onClose={() => setPreviewDoc(null)}
-        onReprocess={handleReprocessDocument}
       />
 
       {/* Delete Confirmation Dialog */}

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { chatWithOpenRouter, type ChatMessage } from "@/lib/openrouter";
+import { requireApiAuth } from "@/lib/api-auth";
 
 interface AudioOverviewRequest {
   notebookId: string;
@@ -77,30 +78,31 @@ Remember to:
   return script;
 }
 
+// ElevenLabs caps a single request; anything past this is dropped by the API.
+const TTS_CHAR_LIMIT = 5000;
+
+// Strip speaker labels and flatten the dialogue into narration text.
+function toNarrationText(script: string): string {
+  return script
+    .split("\n")
+    .filter((line) => line.trim())
+    .map((line) => line.replace(/^(ALEX|SAM):\s*/i, ""))
+    .join(" ");
+}
+
 // Synthesize audio using ElevenLabs
 async function synthesizeWithElevenLabs(
-  script: string
+  narrationText: string
 ): Promise<ArrayBuffer | null> {
   const elevenLabsKey = process.env.ELEVENLABS_API_KEY;
   if (!elevenLabsKey) {
-    console.log("[audio-overview] ElevenLabs API key not configured");
     return null;
   }
 
   // Use a single voice for simplicity and speed
   const voiceId = process.env.ELEVENLABS_VOICE_ID || "21m00Tcm4TlvDq8ikWAM"; // Rachel voice
 
-  // Clean up the script - remove speaker labels for narration
-  const cleanedText = script
-    .split("\n")
-    .filter((line) => line.trim())
-    .map((line) => line.replace(/^(ALEX|SAM):\s*/i, ""))
-    .join(" ")
-    .slice(0, 5000); // ElevenLabs has limits
-
-  console.log(
-    `[audio-overview] Synthesizing ${cleanedText.length} characters with ElevenLabs`
-  );
+  const cleanedText = narrationText.slice(0, TTS_CHAR_LIMIT);
 
   try {
     const response = await fetch(
@@ -123,24 +125,24 @@ async function synthesizeWithElevenLabs(
     );
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error(
-        `[audio-overview] ElevenLabs API error:`,
-        response.status,
-        errorText
-      );
       return null;
     }
 
-    console.log("[audio-overview] Audio synthesized successfully");
     return await response.arrayBuffer();
-  } catch (error) {
-    console.error("[audio-overview] ElevenLabs error:", error);
+  } catch {
     return null;
   }
 }
 
+// Script generation plus TTS regularly runs past a minute.
+export const maxDuration = 300;
+
 export async function POST(request: NextRequest) {
+  // This route spends real money per call (OpenRouter + ElevenLabs), so an
+  // anonymous caller was a direct cash-burn vector.
+  const { errorResponse } = await requireApiAuth();
+  if (errorResponse) return errorResponse;
+
   try {
     const body: AudioOverviewRequest = await request.json();
     const { notebookId, notebookTitle, documents, duration = "medium" } = body;
@@ -152,10 +154,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log(
-      `[audio-overview] Generating script for "${notebookTitle}" with ${documents.length} documents`
-    );
-
     // Step 1: Generate the podcast script
     const script = await generatePodcastScript(
       notebookTitle,
@@ -163,19 +161,23 @@ export async function POST(request: NextRequest) {
       duration
     );
 
-    console.log(
-      `[audio-overview] Script generated: ${script.length} chars, ${script.split(/\s+/).length} words`
-    );
-
     // Step 2: Synthesize audio with ElevenLabs
     let audioBase64: string | null = null;
-    let audioFormat: string = "mp3";
+    const audioFormat = "mp3";
 
-    console.log("[audio-overview] Using ElevenLabs for audio synthesis");
-    const audio = await synthesizeWithElevenLabs(script);
+    const narrationText = toNarrationText(script);
+    const spokenText = narrationText.slice(0, TTS_CHAR_LIMIT);
+    const isTruncated = narrationText.length > TTS_CHAR_LIMIT;
+
+    const audio = await synthesizeWithElevenLabs(narrationText);
     if (audio) {
       audioBase64 = Buffer.from(audio).toString("base64");
     }
+
+    // Duration must describe what was actually synthesized, not the full
+    // script — the two diverge whenever the script is longer than one
+    // ElevenLabs request, and the UI was reporting the script's length.
+    const wordsAt = (t: string) => t.split(/\s+/).filter(Boolean).length;
 
     return NextResponse.json({
       success: true,
@@ -186,20 +188,19 @@ export async function POST(request: NextRequest) {
             data: audioBase64,
             format: audioFormat,
             available: true,
+            truncated: isTruncated,
           }
         : {
             available: false,
             message: "Audio synthesis failed",
           },
-      wordCount: script.split(/\s+/).length,
-      estimatedDuration: Math.round(script.split(/\s+/).length / 150), // ~150 words per minute
+      wordCount: wordsAt(script),
+      // ~150 words per minute, measured over the narrated portion only.
+      estimatedDuration: Math.max(1, Math.round(wordsAt(spokenText) / 150)),
     });
-  } catch (error) {
-    console.error("[audio-overview] Error:", error);
-    const errorMessage =
-      error instanceof Error ? error.message : "Unknown error";
+  } catch {
     return NextResponse.json(
-      { error: `Failed to generate audio overview: ${errorMessage}` },
+      { error: "Failed to generate audio overview" },
       { status: 500 }
     );
   }

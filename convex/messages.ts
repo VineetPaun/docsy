@@ -1,16 +1,12 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { getUser, requireOwnedNotebook, requireUser } from "./lib/auth";
 
 // Get all messages for a notebook
 export const getMessages = query({
-  args: { notebookId: v.id("notebooks"), clerkId: v.string() },
-  handler: async (ctx: any, args: any) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerk_id", (q: any) => q.eq("clerkId", args.clerkId))
-      .first();
-
+  args: { notebookId: v.id("notebooks") },
+  handler: async (ctx, args) => {
+    const user = await getUser(ctx);
     if (!user) {
       return [];
     }
@@ -23,11 +19,11 @@ export const getMessages = query({
 
     const messages = await ctx.db
       .query("messages")
-      .withIndex("by_notebook", (q: any) => q.eq("notebookId", args.notebookId))
+      .withIndex("by_notebook", (q) => q.eq("notebookId", args.notebookId))
       .collect();
 
     // Sort by timestamp ascending (oldest first)
-    return messages.sort((a: any, b: any) => a.timestamp - b.timestamp);
+    return messages.sort((a, b) => a.timestamp - b.timestamp);
   },
 });
 
@@ -35,28 +31,15 @@ export const getMessages = query({
 export const addMessage = mutation({
   args: {
     notebookId: v.id("notebooks"),
-    clerkId: v.string(),
     role: v.string(),
     content: v.string(),
     timestamp: v.number(),
     sources: v.optional(v.array(v.string())),
     citations: v.optional(v.string()),
   },
-  handler: async (ctx: any, args: any) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerk_id", (q: any) => q.eq("clerkId", args.clerkId))
-      .first();
-
-    if (!user) {
-      throw new Error("User not found");
-    }
-
-    // Verify user owns this notebook
-    const notebook = await ctx.db.get(args.notebookId);
-    if (!notebook || notebook.userId !== user._id) {
-      throw new Error("Notebook not found");
-    }
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    await requireOwnedNotebook(ctx, user, args.notebookId);
 
     const messageId = await ctx.db.insert("messages", {
       notebookId: args.notebookId,
@@ -74,26 +57,14 @@ export const addMessage = mutation({
 
 // Clear all messages in a notebook
 export const clearMessages = mutation({
-  args: { notebookId: v.id("notebooks"), clerkId: v.string() },
-  handler: async (ctx: any, args: any) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerk_id", (q: any) => q.eq("clerkId", args.clerkId))
-      .first();
-
-    if (!user) {
-      throw new Error("User not found");
-    }
-
-    // Verify user owns this notebook
-    const notebook = await ctx.db.get(args.notebookId);
-    if (!notebook || notebook.userId !== user._id) {
-      throw new Error("Notebook not found");
-    }
+  args: { notebookId: v.id("notebooks") },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    await requireOwnedNotebook(ctx, user, args.notebookId);
 
     const messages = await ctx.db
       .query("messages")
-      .withIndex("by_notebook", (q: any) => q.eq("notebookId", args.notebookId))
+      .withIndex("by_notebook", (q) => q.eq("notebookId", args.notebookId))
       .collect();
 
     for (const message of messages) {

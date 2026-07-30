@@ -21,6 +21,7 @@ export function CitationTooltip({
 }: CitationTooltipProps) {
   const [isVisible, setIsVisible] = React.useState(false);
   const [position, setPosition] = React.useState<"top" | "bottom">("top");
+  const tooltipId = React.useId();
   const triggerRef = React.useRef<HTMLButtonElement>(null);
   const tooltipRef = React.useRef<HTMLDivElement>(null);
   const timeoutRef = React.useRef<NodeJS.Timeout | null>(null);
@@ -31,19 +32,19 @@ export function CitationTooltip({
     return content.slice(0, 200).trim() + "...";
   }, [content]);
 
+  // Pick the side with room for the panel, then show it.
+  const show = () => {
+    if (triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      const spaceAbove = rect.top;
+      const spaceBelow = window.innerHeight - rect.bottom;
+      setPosition(spaceAbove > spaceBelow && spaceAbove > 200 ? "top" : "bottom");
+    }
+    setIsVisible(true);
+  };
+
   const handleMouseEnter = () => {
-    timeoutRef.current = setTimeout(() => {
-      // Calculate position based on available space
-      if (triggerRef.current) {
-        const rect = triggerRef.current.getBoundingClientRect();
-        const spaceAbove = rect.top;
-        const spaceBelow = window.innerHeight - rect.bottom;
-        setPosition(
-          spaceAbove > spaceBelow && spaceAbove > 200 ? "top" : "bottom",
-        );
-      }
-      setIsVisible(true);
-    }, 300); // Small delay to prevent accidental triggers
+    timeoutRef.current = setTimeout(show, 300); // Guards accidental triggers
   };
 
   const handleMouseLeave = () => {
@@ -68,8 +69,21 @@ export function CitationTooltip({
         onClick={onClick}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
+        // The preview used to appear on hover only, so a keyboard user could
+        // open the citation but never see what it said (AUDIT.md §9.4). Focus
+        // shows it with no delay; Escape dismisses it without leaving the
+        // control.
+        onFocus={show}
+        onBlur={handleMouseLeave}
+        onKeyDown={(e) => {
+          if (e.key === "Escape" && isVisible) {
+            e.stopPropagation();
+            setIsVisible(false);
+          }
+        }}
+        aria-label={`Citation ${citationNumber} from "${documentName}"${pageNumber ? `, page ${pageNumber}` : ""} — open the cited passage`}
+        aria-describedby={isVisible ? tooltipId : undefined}
         className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 mx-0.5 text-xs font-medium bg-primary/20 hover:bg-primary/30 text-primary rounded transition-colors cursor-pointer"
-        title={`From "${documentName}"${pageNumber ? ` (Page ${pageNumber})` : ""} - Click to view source`}
       >
         {citationNumber}
       </button>
@@ -78,6 +92,8 @@ export function CitationTooltip({
       {isVisible && (
         <div
           ref={tooltipRef}
+          id={tooltipId}
+          role="tooltip"
           className={`absolute z-50 w-72 max-w-sm p-3 bg-popover border border-border rounded-lg shadow-lg animate-in fade-in-0 zoom-in-95 duration-200 ${
             position === "top"
               ? "bottom-full mb-2 origin-bottom"

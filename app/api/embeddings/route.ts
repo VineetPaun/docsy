@@ -8,6 +8,7 @@ import {
 } from "@/lib/qdrant";
 import { randomUUID } from "crypto";
 import { requireApiAuth } from "@/lib/api-auth";
+import { requireNotebookOwner } from "@/lib/convex-server";
 
 interface EmbeddingsRequest {
   documentId: string;
@@ -34,6 +35,10 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    // Writing vectors into a notebook you do not own poisons its retrieval.
+    const notOwner = await requireNotebookOwner(notebookId);
+    if (notOwner) return notOwner;
 
     // Check for API key
     const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
@@ -100,33 +105,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// DELETE endpoint to remove document embeddings
-export async function DELETE(request: NextRequest) {
-  // Without this, `DELETE ?documentId=X` wiped any user's vectors.
-  const { errorResponse } = await requireApiAuth();
-  if (errorResponse) return errorResponse;
-
-  try {
-    const { searchParams } = new URL(request.url);
-    const documentId = searchParams.get("documentId");
-
-    if (!documentId) {
-      return NextResponse.json(
-        { error: "Missing documentId parameter" },
-        { status: 400 }
-      );
-    }
-
-    await deleteDocumentChunks(documentId);
-
-    return NextResponse.json({
-      success: true,
-      message: `Deleted embeddings for document ${documentId}`,
-    });
-  } catch {
-    return NextResponse.json(
-      { error: "Failed to delete embeddings" },
-      { status: 500 }
-    );
-  }
-}
+// There is deliberately no DELETE handler. Vector cleanup is cascaded from the
+// Convex delete mutations via `internal.cleanup.purgeVectors` (AUDIT.md §4.1),
+// so an endpoint that deletes vectors by id would be an attack surface with no
+// caller.

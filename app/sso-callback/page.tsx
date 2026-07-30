@@ -70,6 +70,8 @@ export default function SSOCallbackPage() {
       <div className="space-y-6 text-center">
         <div className="mx-auto flex size-16 items-center justify-center">
           <svg
+            role="status"
+            aria-label="Signing you in"
             className="size-8 animate-spin text-muted-foreground"
             xmlns="http://www.w3.org/2000/svg"
             fill="none"

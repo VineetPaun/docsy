@@ -78,9 +78,12 @@ const features = [
         <path d="M7 11V7a5 5 0 0 1 10 0v4" />
       </svg>
     ),
-    title: "Private & secure",
+    title: "Private to your account",
+    // Kept honest deliberately: sources are sent to the AI providers that
+    // embed and answer over them, so "never shared with third parties" was
+    // false. What is true is per-account isolation. AUDIT.md §12 Phase 0.
     description:
-      "Your documents stay yours. We use encryption and never share your data with third parties.",
+      "Every notebook is scoped to your account — no other user can read your sources. They reach our AI providers only to answer your own questions.",
   },
 ];
 

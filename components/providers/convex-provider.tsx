@@ -1,6 +1,8 @@
 "use client";
 
-import { ConvexProvider, ConvexReactClient } from "convex/react";
+import { useAuth } from "@clerk/nextjs";
+import { ConvexReactClient } from "convex/react";
+import { ConvexProviderWithClerk } from "convex/react-clerk";
 import { ReactNode, createContext, useContext } from "react";
 
 // Handle missing URL gracefully during build
@@ -26,9 +28,14 @@ export function ConvexClientProvider({ children }: { children: ReactNode }) {
     );
   }
 
+  // ConvexProviderWithClerk — not plain ConvexProvider — is what attaches the
+  // Clerk JWT to every query and mutation. Without it `ctx.auth` is always
+  // empty in convex/ and every function reads as anonymous.
   return (
     <ConvexAvailableContext.Provider value={true}>
-      <ConvexProvider client={convex}>{children}</ConvexProvider>
+      <ConvexProviderWithClerk client={convex} useAuth={useAuth}>
+        {children}
+      </ConvexProviderWithClerk>
     </ConvexAvailableContext.Provider>
   );
 }

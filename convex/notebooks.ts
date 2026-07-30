@@ -1,39 +1,32 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { getUser, requireOwnedNotebook, requireUser } from "./lib/auth";
+import { purgeNotebook } from "./lib/cascade";
 
-// Get all notebooks for a user
+// Get all notebooks for the signed-in user
 export const getNotebooks = query({
-  args: { clerkId: v.string() },
-  handler: async (ctx: any, args: any) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerk_id", (q: any) => q.eq("clerkId", args.clerkId))
-      .first();
-
+  args: {},
+  handler: async (ctx) => {
+    const user = await getUser(ctx);
     if (!user) {
       return [];
     }
 
     const notebooks = await ctx.db
       .query("notebooks")
-      .withIndex("by_user", (q: any) => q.eq("userId", user._id))
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
       .collect();
 
     // Sort by most recently updated
-    return notebooks.sort((a: any, b: any) => b.updatedAt - a.updatedAt);
+    return notebooks.sort((a, b) => b.updatedAt - a.updatedAt);
   },
 });
 
 // Get a single notebook
 export const getNotebook = query({
-  args: { notebookId: v.id("notebooks"), clerkId: v.string() },
-  handler: async (ctx: any, args: any) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerk_id", (q: any) => q.eq("clerkId", args.clerkId))
-      .first();
-
+  args: { notebookId: v.id("notebooks") },
+  handler: async (ctx, args) => {
+    const user = await getUser(ctx);
     if (!user) {
       return null;
     }
@@ -51,19 +44,11 @@ export const getNotebook = query({
 // Create a new notebook
 export const createNotebook = mutation({
   args: {
-    clerkId: v.string(),
     title: v.string(),
     description: v.optional(v.string()),
   },
-  handler: async (ctx: any, args: any) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerk_id", (q: any) => q.eq("clerkId", args.clerkId))
-      .first();
-
-    if (!user) {
-      throw new Error("User not found");
-    }
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
 
     const notebookId = await ctx.db.insert("notebooks", {
       userId: user._id,
@@ -81,36 +66,20 @@ export const createNotebook = mutation({
 export const updateNotebook = mutation({
   args: {
     notebookId: v.id("notebooks"),
-    clerkId: v.string(),
     title: v.optional(v.string()),
     description: v.optional(v.string()),
-    canvasContent: v.optional(v.string()),
-    canvasHtml: v.optional(v.string()),
+    // No canvas args: the editor was removed in 4d9decb, so nothing writes
+    // canvasContent / canvasHtml any more. The schema keeps the fields as
+    // optional because dropping a field whose rows still carry a value fails
+    // the Convex push — that needs a data migration first (AUDIT.md §4.11).
   },
-  handler: async (ctx: any, args: any) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerk_id", (q: any) => q.eq("clerkId", args.clerkId))
-      .first();
-
-    if (!user) {
-      throw new Error("User not found");
-    }
-
-    const notebook = await ctx.db.get(args.notebookId);
-
-    if (!notebook || notebook.userId !== user._id) {
-      throw new Error("Notebook not found");
-    }
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    await requireOwnedNotebook(ctx, user, args.notebookId);
 
     const updates: Record<string, unknown> = { updatedAt: Date.now() };
     if (args.title !== undefined) updates.title = args.title;
     if (args.description !== undefined) updates.description = args.description;
-    if (args.canvasContent !== undefined) {
-      updates.canvasContent = args.canvasContent;
-      updates.canvasLastEditedAt = Date.now();
-    }
-    if (args.canvasHtml !== undefined) updates.canvasHtml = args.canvasHtml;
 
     await ctx.db.patch(args.notebookId, updates);
   },
@@ -118,53 +87,28 @@ export const updateNotebook = mutation({
 
 // Delete a notebook
 export const deleteNotebook = mutation({
-  args: { notebookId: v.id("notebooks"), clerkId: v.string() },
-  handler: async (ctx: any, args: any) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerk_id", (q: any) => q.eq("clerkId", args.clerkId))
-      .first();
+  args: { notebookId: v.id("notebooks") },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    await requireOwnedNotebook(ctx, user, args.notebookId);
 
-    if (!user) {
-      throw new Error("User not found");
-    }
-
-    const notebook = await ctx.db.get(args.notebookId);
-
-    if (!notebook || notebook.userId !== user._id) {
-      throw new Error("Notebook not found");
-    }
-
-    // Delete all documents in notebook
-    const documents = await ctx.db
-      .query("documents")
-      .withIndex("by_notebook", (q: any) => q.eq("notebookId", args.notebookId))
-      .collect();
-
-    for (const doc of documents) {
-      await ctx.db.delete(doc._id);
-    }
-
-    await ctx.db.delete(args.notebookId);
+    // Documents, messages, audio overviews, storage files and vectors.
+    await purgeNotebook(ctx, args.notebookId);
   },
 });
 
-// Get notebook count for a user
+// Get notebook count for the signed-in user
 export const getNotebookCount = query({
-  args: { clerkId: v.string() },
-  handler: async (ctx: any, args: any) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerk_id", (q: any) => q.eq("clerkId", args.clerkId))
-      .first();
-
+  args: {},
+  handler: async (ctx) => {
+    const user = await getUser(ctx);
     if (!user) {
       return 0;
     }
 
     const notebooks = await ctx.db
       .query("notebooks")
-      .withIndex("by_user", (q: any) => q.eq("userId", user._id))
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
       .collect();
 
     return notebooks.length;

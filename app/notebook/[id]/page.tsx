@@ -7,13 +7,19 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { UserSync } from "@/components/user-sync";
 import { SourcesPanel } from "@/components/sources-panel";
 import { NotebookChat, type Citation } from "@/components/notebook-chat";
 import {
   DocumentPreview,
   type HighlightRange,
 } from "@/components/document-preview";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import * as React from "react";
 
@@ -34,12 +40,19 @@ interface Notebook {
   canvasHtml?: string;
 }
 
-// Tab type for the right panel
+type MobileView = "sources" | "chat";
 
 export default function NotebookPage() {
   const params = useParams();
   const notebookId = params.id as string;
   const { user, isLoaded } = useUser();
+  // Which panel a phone shows. Ignored from `md` up, where both are visible.
+  const [mobileView, setMobileView] = React.useState<MobileView>("chat");
+  // Which sources are checked. Owned here because the panel renders the
+  // checkboxes and the chat sends the ids to /api/chat. Empty = all sources.
+  const [selectedDocs, setSelectedDocs] = React.useState<Set<string>>(
+    new Set(),
+  );
   const [isEditingTitle, setIsEditingTitle] = React.useState(false);
   const [editedTitle, setEditedTitle] = React.useState("");
   const titleInputRef = React.useRef<HTMLInputElement>(null);
@@ -52,16 +65,16 @@ export default function NotebookPage() {
     HighlightRange | undefined
   >(undefined);
 
+  // Convex resolves the caller from the Clerk token, so these only need to
+  // wait for `user` to confirm a session exists before firing.
   const notebook = useQuery(
     api.notebooks.getNotebook,
-    user ? { notebookId: notebookId as never, clerkId: user.id } : "skip",
+    user ? { notebookId: notebookId as never } : "skip",
   ) as Notebook | null | undefined;
 
   const documents = useQuery(
     api.documents.getDocuments,
-    user && notebook
-      ? { notebookId: notebookId as never, clerkId: user.id }
-      : "skip",
+    user && notebook ? { notebookId: notebookId as never } : "skip",
   ) as Document[] | undefined;
 
   const deleteDocument = useMutation(api.documents.deleteDocument);
@@ -70,18 +83,11 @@ export default function NotebookPage() {
   const handleDeleteDocument = async (documentId: string) => {
     if (!user) return;
     try {
+      // Storage file and Qdrant vectors are cascaded server-side by the
+      // mutation — the client no longer cleans up after itself.
       await deleteDocument({
         documentId: documentId as never,
-        clerkId: user.id,
       });
-      // Also delete embeddings from Qdrant
-      try {
-        await fetch(`/api/embeddings?documentId=${documentId}`, {
-          method: "DELETE",
-        });
-      } catch {
-        // Non-fatal: the document row is gone, the vectors are orphaned.
-      }
     } catch {
       toast.error("Failed to delete source");
     }
@@ -92,7 +98,6 @@ export default function NotebookPage() {
     try {
       await updateNotebook({
         notebookId: notebook._id as never,
-        clerkId: user.id,
         title: editedTitle.trim(),
       });
       setIsEditingTitle(false);
@@ -139,9 +144,10 @@ export default function NotebookPage() {
 
   if (!isLoaded) {
     return (
-      <div className="flex h-screen items-center justify-center bg-background">
-        <div className="flex items-center gap-2">
+      <div className="flex h-dvh items-center justify-center bg-background">
+        <div role="status" className="flex items-center gap-2">
           <svg
+            aria-hidden="true"
             className="size-5 animate-spin text-muted-foreground"
             xmlns="http://www.w3.org/2000/svg"
             fill="none"
@@ -169,7 +175,7 @@ export default function NotebookPage() {
 
   if (!user) {
     return (
-      <div className="flex h-screen items-center justify-center bg-background">
+      <div className="flex h-dvh items-center justify-center bg-background">
         <div className="text-center">
           <h1 className="text-2xl font-bold">Access Denied</h1>
           <p className="mt-2 text-muted-foreground">
@@ -185,7 +191,7 @@ export default function NotebookPage() {
 
   if (notebook === null) {
     return (
-      <div className="flex h-screen items-center justify-center bg-background">
+      <div className="flex h-dvh items-center justify-center bg-background">
         <div className="text-center">
           <h1 className="text-2xl font-bold">Notebook Not Found</h1>
           <p className="mt-2 text-muted-foreground">
@@ -201,11 +207,12 @@ export default function NotebookPage() {
 
   return (
     <>
-      <UserSync />
-      <div className="flex h-screen flex-col bg-background">
+      <div className="flex h-dvh flex-col bg-background">
         {/* Compact Header */}
-        <header className="flex h-14 shrink-0 items-center justify-between border-b border-border/40 bg-background px-4">
-          <div className="flex items-center gap-4">
+        <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border/40 bg-background px-3 sm:px-4">
+          {/* min-w-0 lets the title truncate instead of shoving the controls
+              off a narrow screen. */}
+          <div className="flex min-w-0 items-center gap-2 sm:gap-4">
             <Link
               href="/dashboard"
               className="flex items-center gap-2 transition-opacity hover:opacity-80"
@@ -229,10 +236,14 @@ export default function NotebookPage() {
                   <path d="M14 17h2" />
                 </svg>
               </div>
-              <span className="font-semibold tracking-tight">docsy</span>
+              {/* The mark alone carries it on phones; the wordmark is the
+                  first thing worth spending width on. */}
+              <span className="hidden font-semibold tracking-tight sm:inline">
+                docsy
+              </span>
             </Link>
 
-            <span className="h-6 w-px bg-border/60" />
+            <span className="h-6 w-px shrink-0 bg-border/60" />
 
             {notebook === undefined ? (
               <div className="h-6 w-40 animate-pulse rounded bg-muted" />
@@ -250,47 +261,83 @@ export default function NotebookPage() {
                     setIsEditingTitle(false);
                   }
                 }}
-                className="bg-transparent text-lg font-medium outline-none border-b-2 border-primary"
+                className="min-w-0 border-b-2 border-primary bg-transparent text-base font-medium outline-none sm:text-lg"
               />
             ) : (
               <button
                 onClick={() => setIsEditingTitle(true)}
-                className="text-lg font-medium hover:text-muted-foreground"
+                className="truncate text-base font-medium hover:text-muted-foreground sm:text-lg"
               >
                 {notebook.title}
               </button>
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1 sm:gap-2">
             <ThemeToggle />
             <UserButton />
           </div>
         </header>
 
-        {/* Main Content - Two Panel Layout */}
-        <div className="flex flex-1 overflow-hidden">
-          {/* Left Panel - Sources (40%) */}
-          <div className="w-[40%] min-w-[320px] max-w-[480px] border-r border-border/40">
+        {/*
+          Sources and chat: stacked behind a tab switcher on phones, side by
+          side from `md` up. The two `!` utilities are deliberate — the Tabs
+          root ships `data-horizontal:flex-col` and `gap-2`, and an attribute
+          selector out-specifies a plain `md:flex-row`.
+        */}
+        <Tabs
+          value={mobileView}
+          onValueChange={(value) => setMobileView(value as MobileView)}
+          className="flex min-h-0 flex-1 gap-0! overflow-hidden md:flex-row!"
+        >
+          {/*
+            Phones only. Both panels stay mounted (`forceMount` below), so
+            switching tabs never discards a half-typed question.
+          */}
+          <TabsList className="mx-3 mt-3 h-9 shrink-0 md:hidden">
+            <TabsTrigger value="sources" className="text-sm">
+              Sources
+              {documents?.length ? ` (${documents.length})` : ""}
+            </TabsTrigger>
+            <TabsTrigger value="chat" className="text-sm">
+              Chat
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent
+            value="sources"
+            forceMount
+            className={cn(
+              "min-h-0 overflow-hidden md:block md:w-[40%] md:min-w-[320px] md:max-w-[480px] md:flex-none md:border-r md:border-border/40",
+              mobileView === "sources" ? "block" : "hidden"
+            )}
+          >
             <SourcesPanel
               notebookId={notebookId}
-              clerkId={user.id}
               documents={documents}
               onDeleteDocument={handleDeleteDocument}
+              selectedDocs={selectedDocs}
+              setSelectedDocs={setSelectedDocs}
             />
-          </div>
+          </TabsContent>
 
-          {/* Right Panel - Chat */}
-          <div className="flex-1">
+          <TabsContent
+            value="chat"
+            forceMount
+            className={cn(
+              "min-h-0 overflow-hidden md:block md:flex-1",
+              mobileView === "chat" ? "block" : "hidden"
+            )}
+          >
             <NotebookChat
               documents={documents}
               notebookId={notebookId}
               notebookTitle={notebook?.title ?? "Notebook"}
-              clerkId={user.id}
+              selectedDocs={selectedDocs}
               onCitationClick={handleCitationClick}
             />
-          </div>
-        </div>
+          </TabsContent>
+        </Tabs>
 
         {/* Document Preview Modal for Citations */}
         <DocumentPreview

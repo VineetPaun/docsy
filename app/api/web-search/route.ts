@@ -35,17 +35,21 @@ export async function POST(request: NextRequest) {
 
     if (tavilyKey) {
       return await searchWithTavily(query, limit, tavilyKey);
-    } else if (serperKey) {
+    }
+    if (serperKey) {
       return await searchWithSerper(query, limit, serperKey);
     }
 
-    // No API key configured - return demo response
-    return NextResponse.json({
-      success: true,
-      results: generateDemoResults(query),
-      isDemo: true,
-      message: "Web search requires TAVILY_API_KEY or SERPER_API_KEY",
-    });
+    // Unconfigured used to return three fabricated example.com results with
+    // `success: true`, which no caller distinguished from real ones
+    // (AUDIT.md §6.6).
+    return NextResponse.json(
+      {
+        error:
+          "Web search is unavailable: set TAVILY_API_KEY or SERPER_API_KEY",
+      },
+      { status: 503 }
+    );
   } catch {
     return NextResponse.json(
       { error: "Failed to perform web search" },
@@ -137,27 +141,4 @@ async function searchWithSerper(
     results,
     query,
   });
-}
-
-function generateDemoResults(query: string): SearchResult[] {
-  return [
-    {
-      title: `Results for "${query}" - Demo`,
-      url: "https://example.com/result-1",
-      snippet: `This is a demo search result for "${query}". Add TAVILY_API_KEY or SERPER_API_KEY to enable real web search.`,
-      source: "example.com",
-    },
-    {
-      title: `Understanding ${query} - Demo Article`,
-      url: "https://example.com/result-2",
-      snippet: `Learn more about ${query} in this comprehensive guide. This is a placeholder result.`,
-      source: "example.com",
-    },
-    {
-      title: `${query} Best Practices - Demo`,
-      url: "https://example.com/result-3",
-      snippet: `Discover best practices for ${query}. Configure a search API key for real results.`,
-      source: "example.com",
-    },
-  ];
 }

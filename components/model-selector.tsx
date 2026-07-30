@@ -226,7 +226,10 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 top-full z-50 mt-1 flex max-h-[420px] min-w-[400px] overflow-hidden rounded-lg border border-border bg-popover shadow-lg">
+        // 400px is wider than a 375px phone, so the width is capped to the
+        // viewport with a gutter — otherwise the panel forces a horizontal
+        // scroll on mobile.
+        <div className="absolute right-0 top-full z-50 mt-1 flex max-h-[70dvh] w-[calc(100vw-1.5rem)] overflow-hidden rounded-lg border border-border bg-popover shadow-lg sm:max-h-[420px] sm:w-auto sm:min-w-[400px]">
           {/* Provider Sidebar */}
           <div className="flex w-12 flex-col border-r border-border bg-muted/30 py-2">
             <button

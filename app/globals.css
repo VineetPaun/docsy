@@ -151,3 +151,22 @@
 .animate-float-medium {
   animation: float-medium 3s ease-in-out infinite;
 }
+
+/*
+ * Respect the OS "reduce motion" setting (AUDIT.md §9.4). Floating landing
+ * decorations, scale-ins and transitions all collapse to nothing.
+ *
+ * `.animate-spin` is deliberately exempt: a frozen spinner reads as a hung
+ * request, and a small rotating glyph is not the large-area movement the
+ * preference exists to suppress.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *:not(.animate-spin),
+  *:not(.animate-spin)::before,
+  *:not(.animate-spin)::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

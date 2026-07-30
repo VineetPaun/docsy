@@ -44,7 +44,8 @@ interface NotebookChatProps {
   documents: Document[] | undefined;
   notebookId: string;
   notebookTitle: string;
-  clerkId: string;
+  // The sources panel's checked sources. Empty = answer from all of them.
+  selectedDocs: Set<string>;
   onCitationClick?: (citation: Citation) => void;
 }
 
@@ -52,13 +53,12 @@ export function NotebookChat({
   documents,
   notebookId,
   notebookTitle,
-  clerkId,
+  selectedDocs,
   onCitationClick,
 }: NotebookChatProps) {
   // Fetch messages from Convex
   const dbMessages = useQuery(api.messages.getMessages, {
     notebookId: notebookId as never,
-    clerkId,
   });
   const addMessage = useMutation(api.messages.addMessage);
 
@@ -141,7 +141,6 @@ export function NotebookChat({
       // Save user message to database
       await addMessage({
         notebookId: notebookId as never,
-        clerkId,
         role: "user",
         content: userContent,
         timestamp: userTimestamp,
@@ -158,11 +157,8 @@ export function NotebookChat({
               content: m.content,
             }),
           ),
-          documents: (documents || []).map((d) => ({
-            id: d._id,
-            name: d.name,
-            content: d.content,
-          })),
+          // Ids only — the server reads the text from Convex itself.
+          documentIds: [...selectedDocs],
           notebookId,
           notebookTitle,
           model: selectedModel,
@@ -179,7 +175,6 @@ export function NotebookChat({
       // Save assistant message to database
       await addMessage({
         notebookId: notebookId as never,
-        clerkId,
         role: "assistant",
         content: data.message,
         timestamp: Date.now(),
@@ -190,7 +185,6 @@ export function NotebookChat({
       // Save error message to database
       await addMessage({
         notebookId: notebookId as never,
-        clerkId,
         role: "assistant",
         content: `Sorry, I encountered an error: ${error instanceof Error ? error.message : "Unknown error"}. Please try again.`,
         timestamp: Date.now(),
@@ -267,9 +261,9 @@ export function NotebookChat({
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-border/40 px-4 py-3">
+      <div className="flex items-center justify-between gap-2 border-b border-border/40 px-3 py-3 sm:px-4">
         <h2 className="font-semibold">Chat</h2>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           <ModelSelector value={selectedModel} onChange={handleModelChange} />
         </div>
       </div>
@@ -277,7 +271,7 @@ export function NotebookChat({
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto">
         {messages.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center p-8">
+          <div className="flex h-full flex-col items-center justify-center p-6 text-center sm:p-8">
             {!hasDocuments ? (
               <>
                 <div className="flex size-16 items-center justify-center rounded-full bg-muted">
@@ -370,7 +364,7 @@ export function NotebookChat({
                   </div>
                 )}
                 <div
-                  className={`max-w-[80%] ${message.role === "user" ? "order-first" : ""}`}
+                  className={`max-w-[85%] sm:max-w-[80%] ${message.role === "user" ? "order-first" : ""}`}
                 >
                   <div
                     className={`rounded-2xl px-4 py-2.5 ${
@@ -672,9 +666,9 @@ export function NotebookChat({
       </div>
 
       {/* Input Area */}
-      <div className="border-t border-border/40 p-4">
+      <div className="border-t border-border/40 p-3 sm:p-4">
         <form onSubmit={handleSubmit} className="relative">
-          <div className="flex items-end gap-2 rounded-2xl border border-border bg-muted/30 px-4 py-2">
+          <div className="flex items-end gap-2 rounded-2xl border border-border bg-muted/30 px-3 py-2 sm:px-4">
             <textarea
               ref={inputRef}
               value={input}
@@ -696,16 +690,19 @@ export function NotebookChat({
               style={{ maxHeight: "200px" }}
             />
             <div className="flex items-center gap-2 pb-1.5">
-              <span className="text-xs text-muted-foreground">
+              {/* The mobile tab bar already shows the source count. */}
+              <span className="hidden text-xs text-muted-foreground sm:inline">
                 {documents?.length ?? 0} sources
               </span>
               <Button
                 type="submit"
                 size="icon"
+                aria-label="Send message"
                 className="size-8 rounded-full"
                 disabled={!input.trim() || isLoading || !hasDocuments}
               >
                 <svg
+                  aria-hidden="true"
                   xmlns="http://www.w3.org/2000/svg"
                   viewBox="0 0 24 24"
                   fill="none"

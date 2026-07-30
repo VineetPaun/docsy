@@ -58,6 +58,17 @@ export default defineSchema({
     .index("by_notebook", ["notebookId"])
     .index("by_user", ["userId"]),
 
+  // One fixed-window counter per user per rate-limited route (AUDIT.md §3.4).
+  // Convex rather than Redis because it deploys with the app and needs no new
+  // env var — a missing one here would fail silently, which is this repo's
+  // most common failure mode.
+  rateLimits: defineTable({
+    userId: v.id("users"),
+    key: v.string(), // route bucket — see RATE_LIMITS in convex/users.ts
+    windowStart: v.number(),
+    count: v.number(),
+  }).index("by_user_key", ["userId", "key"]),
+
   // Chat messages for notebook conversations
   messages: defineTable({
     notebookId: v.id("notebooks"),

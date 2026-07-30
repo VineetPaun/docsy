@@ -53,9 +53,11 @@ export function Navbar() {
               href="https://github.com/VineetPaun"
               target="_blank"
               rel="noopener noreferrer"
+              aria-label="View this project on GitHub (opens in a new tab)"
               className="text-muted-foreground transition-colors hover:text-foreground"
             >
               <svg
+                aria-hidden="true"
                 xmlns="http://www.w3.org/2000/svg"
                 viewBox="0 0 24 24"
                 fill="currentColor"

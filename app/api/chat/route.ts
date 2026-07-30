@@ -8,6 +8,8 @@ import {
 import { generateEmbedding } from "@/lib/embeddings";
 import { searchChunks, type SearchResult } from "@/lib/qdrant";
 import { requireApiAuth } from "@/lib/api-auth";
+import { notebookDocuments, requireNotebookOwner } from "@/lib/convex-server";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 // Free-tier models on OpenRouter run as low as a 32k context. The system
 // prompt, the retrieved chunks and the conversation history all share it, so
@@ -30,9 +32,11 @@ export interface Citation {
 
 interface ChatRequest {
   messages: { role: "user" | "assistant"; content: string }[];
-  documents: { id?: string; name: string; content?: string }[];
   notebookId: string;
   notebookTitle: string;
+  // Which sources to answer from — the checkboxes in the sources panel.
+  // Absent or empty means the whole notebook.
+  documentIds?: string[];
   model?: string;
   useRAG?: boolean;
 }
@@ -67,16 +71,44 @@ export async function POST(request: NextRequest) {
   const { errorResponse } = await requireApiAuth();
   if (errorResponse) return errorResponse;
 
+  // Charged before any embedding or completion is bought.
+  const limited = await enforceRateLimit("chat");
+  if (limited) return limited;
+
   try {
     const body: ChatRequest = await request.json();
     const {
       messages,
-      documents,
       notebookId,
       notebookTitle,
+      documentIds = [],
       model = DEFAULT_MODEL,
       useRAG = true,
     } = body;
+
+    // Retrieval below reads whatever notebook the body names, so an unowned
+    // id is rejected outright rather than silently answered without RAG.
+    if (notebookId) {
+      const notOwner = await requireNotebookOwner(notebookId);
+      if (notOwner) return notOwner;
+    }
+
+    // Sources come from Convex, not from the request. The client used to post
+    // every document's full text with each message — megabytes per turn on a
+    // mobile connection (AUDIT.md §4.7).
+    const allDocuments = notebookId ? await notebookDocuments(notebookId) : [];
+
+    // Narrow to the user's selection. An id the notebook doesn't contain is
+    // dropped here, so a stale checkbox can't widen the search.
+    const documents =
+      documentIds.length > 0
+        ? allDocuments.filter((d) => documentIds.includes(d._id))
+        : allDocuments;
+
+    // Empty means "no filter" to searchChunks, which is what an empty
+    // selection should do: search the whole notebook.
+    const selectedIds =
+      documentIds.length > 0 ? documents.map((d) => d._id) : [];
 
     // Validate model - use isValidModel helper
     const selectedModel = isValidModel(model) ? model : DEFAULT_MODEL;
@@ -99,6 +131,7 @@ export async function POST(request: NextRequest) {
         const queryEmbedding = await generateEmbedding(userMessage);
         ragResults = await searchChunks(queryEmbedding, notebookId, {
           limit: 5,
+          documentIds: selectedIds,
         });
 
         if (ragResults.length > 0) {
@@ -174,46 +207,40 @@ INSTRUCTIONS:
 - Be concise but thorough
 - Use markdown formatting for better readability`;
 
-    // Check for OpenRouter API key
-    const openRouterKey = process.env.OPENROUTER_API_KEY;
-
-    if (openRouterKey) {
-      // Use OpenRouter
-      const chatMessages: ChatMessage[] = [
-        { role: "system", content: systemPrompt },
-        ...trimHistory(messages).map((m) => ({
-          role: m.role as "user" | "assistant",
-          content: m.content,
-        })),
-      ];
-
-      const assistantMessage = await chatWithOpenRouter(
-        chatMessages,
-        selectedModel,
-        {
-          temperature: 0.7,
-          maxTokens: 2000,
-        }
+    // A missing key used to serve 114 lines of fabricated "demo" text, so a
+    // misconfigured deploy looked like a working one (AUDIT.md §6.6). Fail
+    // loudly instead — 503, because the service is unconfigured, not the
+    // request malformed.
+    if (!process.env.OPENROUTER_API_KEY) {
+      return NextResponse.json(
+        { error: "Chat is unavailable: OPENROUTER_API_KEY is not configured" },
+        { status: 503 }
       );
-
-      // Extract source names for citations
-      const sourceNames = documents.slice(0, 3).map((d) => d.name);
-
-      return NextResponse.json({
-        message: assistantMessage,
-        sources: sourceNames,
-        citations,
-        model: selectedModel,
-      });
     }
 
-    // No API key configured - return demo response
+    const chatMessages: ChatMessage[] = [
+      { role: "system", content: systemPrompt },
+      ...trimHistory(messages).map((m) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      })),
+    ];
+
+    const assistantMessage = await chatWithOpenRouter(
+      chatMessages,
+      selectedModel,
+      {
+        temperature: 0.7,
+        maxTokens: 2000,
+      }
+    );
+
     return NextResponse.json({
-      message: generateDemoResponse(userMessage, documents, notebookTitle),
-      sources: documents.slice(0, 2).map((d) => d.name),
-      citations: [],
-      isDemo: true,
-      model: "demo",
+      message: assistantMessage,
+      // Names of the sources the answer could draw on, for the header line.
+      sources: documents.slice(0, 3).map((d) => d.name),
+      citations,
+      model: selectedModel,
     });
   } catch {
     // Internal error details stay server-side — they leaked upstream API
@@ -223,78 +250,4 @@ INSTRUCTIONS:
       { status: 500 }
     );
   }
-}
-
-function generateDemoResponse(
-  question: string,
-  documents: { name: string; content?: string }[],
-  notebookTitle: string
-): string {
-  if (documents.length === 0) {
-    return "I don't have any sources to reference yet. Please add some documents to get started!";
-  }
-
-  const hasContent = documents.some((d) => d.content && d.content.length > 50);
-  const lowerQ = question.toLowerCase();
-
-  if (!hasContent) {
-    return `I can see you have ${documents.length} source(s) uploaded, but the content hasn't been fully processed yet.
-
-**To enable AI-powered responses:**
-1. Add \`OPENROUTER_API_KEY\` to your environment
-2. Restart the development server
-3. The chat will then use your documents as context for intelligent responses`;
-  }
-
-  if (lowerQ.includes("summarize") || lowerQ.includes("summary")) {
-    return `**Summary of "${notebookTitle}"**
-
-Based on your ${documents.length} source(s), here's an overview:
-
-${documents.map((d, i) => `${i + 1}. **${d.name}** - ${d.content?.slice(0, 100)}...`).join("\n")}
-
----
-*This is a demo response. Add OPENROUTER_API_KEY for detailed analysis.*`;
-  }
-
-  if (
-    lowerQ.includes("key") ||
-    lowerQ.includes("main") ||
-    lowerQ.includes("important")
-  ) {
-    return `**Key Points from Your Sources**
-
-Here are the main topics covered:
-
-• Your documents contain valuable information related to "${notebookTitle}"
-• ${documents.length} sources are available for reference
-• Full AI analysis requires an API connection
-
-**Available Sources:**
-${documents.map((d) => `- ${d.name}`).join("\n")}
-
----
-*Add OPENROUTER_API_KEY for AI-powered analysis*`;
-  }
-
-  return `I found your question: "${question}"
-
-**Demo Mode Active**
-
-To enable full AI-powered responses with your ${documents.length} source(s):
-
-1. Add this to your \`.env.local\`:
-   \`\`\`
-   OPENROUTER_API_KEY=sk-or-...
-   \`\`\`
-
-2. Restart your development server
-
-The AI will then:
-- Analyze your documents
-- Answer questions with citations
-- Summarize and compare sources
-
----
-*${documents.length} source(s) ready for analysis*`;
 }

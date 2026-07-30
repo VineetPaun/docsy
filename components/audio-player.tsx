@@ -15,8 +15,9 @@ import {
 import { Button } from "@/components/ui/button";
 
 interface AudioPlayerProps {
-  audioData?: string; // Base64 encoded audio
-  audioUrl?: string; // Or direct URL
+  // A signed Convex storage URL. The base64 `audioData` prop is gone — audio is
+  // persisted to storage now, never inlined into a response (AUDIT.md §4.2).
+  audioUrl?: string;
   scriptText?: string;
   title?: string;
   onRegenerate?: () => void;
@@ -24,7 +25,6 @@ interface AudioPlayerProps {
 }
 
 export default function AudioPlayer({
-  audioData,
   audioUrl,
   scriptText,
   title = "Audio Overview",
@@ -41,10 +41,7 @@ export default function AudioPlayer({
   const [playbackRate, setPlaybackRate] = useState(1);
   const [showTranscript, setShowTranscript] = useState(false);
 
-  // Create audio source from base64 or URL
-  const audioSource = audioData
-    ? `data:audio/mp3;base64,${audioData}`
-    : audioUrl;
+  const audioSource = audioUrl;
 
   // Format time in MM:SS
   const formatTime = (time: number) => {
@@ -118,7 +115,11 @@ export default function AudioPlayer({
 
     const link = document.createElement("a");
     link.href = audioSource;
+    // ponytail: `download` is ignored on a cross-origin Convex storage URL, so
+    // this opens the MP3 in a new tab rather than saving it. Fetch the blob and
+    // use an object URL if a true "save as" is ever wanted.
     link.download = `${title.replace(/\s+/g, "_")}.mp3`;
+    link.target = "_blank";
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -175,6 +176,37 @@ export default function AudioPlayer({
 
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
 
+  // Keyboard seeking for the progress bar, which was click-only (AUDIT.md §9.4).
+  const handleProgressKeyDown = (e: React.KeyboardEvent) => {
+    const audio = audioRef.current;
+    if (!audio || duration <= 0) return;
+
+    const seekTo = (seconds: number) => {
+      audio.currentTime = Math.min(duration, Math.max(0, seconds));
+    };
+
+    switch (e.key) {
+      case "ArrowRight":
+      case "ArrowUp":
+        e.preventDefault();
+        seekTo(audio.currentTime + 5);
+        break;
+      case "ArrowLeft":
+      case "ArrowDown":
+        e.preventDefault();
+        seekTo(audio.currentTime - 5);
+        break;
+      case "Home":
+        e.preventDefault();
+        seekTo(0);
+        break;
+      case "End":
+        e.preventDefault();
+        seekTo(duration);
+        break;
+    }
+  };
+
   // Show nothing only if we have no audio, no script, and not generating
   if (!audioSource && !isGenerating && !scriptText) {
     return null;
@@ -226,6 +258,7 @@ export default function AudioPlayer({
               variant="ghost"
               size="icon"
               onClick={handleDownload}
+              aria-label="Download the audio overview"
               disabled={!audioSource}
               className="h-8 w-8"
             >
@@ -240,8 +273,16 @@ export default function AudioPlayer({
         <>
           <div
             ref={progressRef}
-            className="h-2 bg-secondary rounded-full cursor-pointer mb-3 group"
+            role="slider"
+            tabIndex={0}
+            aria-label="Seek"
+            aria-valuemin={0}
+            aria-valuemax={Math.round(duration)}
+            aria-valuenow={Math.round(currentTime)}
+            aria-valuetext={`${formatTime(currentTime)} of ${formatTime(duration)}`}
+            className="h-2 bg-secondary rounded-full cursor-pointer mb-3 group focus-visible:outline-2 focus-visible:outline-offset-2"
             onClick={handleProgressClick}
+            onKeyDown={handleProgressKeyDown}
           >
             <div
               className="h-full bg-gradient-to-r from-purple-500 to-blue-500 rounded-full relative transition-all"
@@ -268,6 +309,7 @@ export default function AudioPlayer({
               variant="ghost"
               size="icon"
               onClick={restart}
+              aria-label="Restart from the beginning"
               className="h-8 w-8"
               disabled={!audioSource}
             >
@@ -279,6 +321,7 @@ export default function AudioPlayer({
               variant="default"
               size="icon"
               onClick={togglePlay}
+              aria-label={isPlaying ? "Pause" : "Play"}
               className="h-12 w-12 rounded-full bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600"
               disabled={!audioSource || isGenerating}
             >
@@ -294,6 +337,7 @@ export default function AudioPlayer({
               variant="ghost"
               size="icon"
               onClick={toggleMute}
+              aria-label={isMuted ? "Unmute" : "Mute"}
               className="h-8 w-8"
               disabled={!audioSource}
             >
@@ -311,6 +355,7 @@ export default function AudioPlayer({
               variant="outline"
               size="sm"
               onClick={cyclePlaybackRate}
+              aria-label={`Playback speed ${playbackRate}x — click to change`}
               className="text-xs h-7 px-2"
               disabled={!audioSource}
             >
@@ -392,7 +437,11 @@ export default function AudioPlayer({
       {/* Generating state */}
       {isGenerating && (
         <div className="mt-4 p-4 bg-secondary/50 rounded-lg text-center">
-          <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-purple-400" />
+          <RefreshCw
+            role="status"
+            aria-label="Generating your audio overview"
+            className="w-6 h-6 animate-spin mx-auto mb-2 text-purple-400"
+          />
           <p className="text-sm text-muted-foreground">
             Generating your audio overview...
           </p>

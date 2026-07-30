@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { chatWithOpenRouter, DEFAULT_MODEL, type ModelId } from "@/lib/openrouter";
 import { requireApiAuth } from "@/lib/api-auth";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 interface ResearchRequest {
   topic: string;
@@ -22,6 +23,9 @@ export async function POST(request: NextRequest) {
   const { errorResponse } = await requireApiAuth();
   if (errorResponse) return errorResponse;
 
+  const limited = await enforceRateLimit("research");
+  if (limited) return limited;
+
   try {
     const body: ResearchRequest = await request.json();
     const { topic, depth = "standard", model = DEFAULT_MODEL } = body;
@@ -38,13 +42,16 @@ export async function POST(request: NextRequest) {
     const tavilyKey = process.env.TAVILY_API_KEY;
     const serperKey = process.env.SERPER_API_KEY;
 
+    // Returned a canned "demo report" with a 200 before, so a deploy missing
+    // the key produced plausible-looking output (AUDIT.md §6.6).
     if (!openRouterKey) {
-      return NextResponse.json({
-        success: false,
-        error: "OPENROUTER_API_KEY required for research mode",
-        isDemo: true,
-        report: generateDemoReport(topic),
-      });
+      return NextResponse.json(
+        {
+          error:
+            "Research is unavailable: OPENROUTER_API_KEY is not configured",
+        },
+        { status: 503 }
+      );
     }
 
     // Step 1: Generate search queries based on the topic
@@ -188,28 +195,4 @@ Generate a research report on this topic.`,
   );
 
   return response;
-}
-
-function generateDemoReport(topic: string): string {
-  return `# Research Report: ${topic}
-
-## Overview
-
-This is a demo research report. To enable full research capabilities, please configure the following environment variables:
-
-- \`OPENROUTER_API_KEY\` - Required for AI-powered synthesis
-- \`TAVILY_API_KEY\` or \`SERPER_API_KEY\` - Required for web search
-
-## How Fast Research Works
-
-1. **Query Generation**: AI generates multiple search queries related to your topic
-2. **Web Search**: Searches the web for relevant sources
-3. **Synthesis**: AI analyzes all sources and creates a comprehensive report
-
-## Getting Started
-
-Add the required API keys to your \`.env.local\` file and restart the development server.
-
----
-*This is a demo response. Configure API keys for real research capabilities.*`;
 }

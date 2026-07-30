@@ -1,13 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { chatWithOpenRouter, type ChatMessage } from "@/lib/openrouter";
 import { requireApiAuth } from "@/lib/api-auth";
+import {
+  authedConvexClient,
+  notebookDocuments,
+  requireNotebookOwner,
+} from "@/lib/convex-server";
+import { enforceRateLimit } from "@/lib/rate-limit";
+import { api } from "@/convex/_generated/api";
 
 interface AudioOverviewRequest {
   notebookId: string;
   notebookTitle: string;
-  documents: { name: string; content: string }[];
   duration?: "short" | "medium" | "long"; // 3min, 5min, 10min
 }
+
+// A source with less text than this has nothing worth narrating.
+const MIN_CONTENT_CHARS = 50;
 
 // Generate the podcast script
 async function generatePodcastScript(
@@ -28,24 +37,24 @@ async function generatePodcastScript(
     .map((doc) => `=== ${doc.name} ===\n${doc.content?.slice(0, 10000) || ""}`)
     .join("\n\n---\n\n");
 
-  const systemPrompt = `You are a podcast script writer. Your task is to create an engaging, conversational script for a two-host podcast episode discussing research documents.
-
-The hosts are:
-- Alex: The main host who explains concepts clearly and asks insightful questions
-- Sam: The co-host who provides additional context, asks follow-up questions, and adds interesting observations
+  // Single narrator, deliberately. The prompt used to generate a two-host
+  // "ALEX:" / "SAM:" dialogue that synthesis then read with one voice, so the
+  // output sounded like a person talking to themselves (AUDIT.md §4.4). Two
+  // voices means two TTS calls stitched together — that belongs with §4.3.
+  const systemPrompt = `You are a podcast script writer. Your task is to write an engaging, conversational solo-narrator episode discussing research documents.
 
 SCRIPT FORMAT:
-- Write in dialogue format: "ALEX: [dialogue]" and "SAM: [dialogue]"
-- Make it conversational and engaging, like two friends discussing interesting research
-- Include natural transitions, humor where appropriate, and genuine curiosity
+- One narrator speaking directly to the listener. No dialogue, no speaker labels, no interviewer
+- Plain prose only — no headings, stage directions, sound cues or bracketed notes; every word will be read aloud
+- Make it warm and conversational, like an expert explaining something they find genuinely interesting
+- Include natural transitions
 - Target ${targetWords} words total
 - Start with a brief intro and end with key takeaways
 
 STYLE GUIDELINES:
 - Use clear, accessible language (avoid jargon unless explaining it)
-- Include "ums" and "you knows" sparingly for natural speech
-- Have hosts build on each other's points
-- Include moments of surprise or insight ("Oh, that's interesting!")
+- Vary sentence length so it does not read as a list
+- Point out what is surprising or counter-intuitive
 - Reference specific facts and quotes from the documents
 
 The notebook is titled: "${notebookTitle}"`;
@@ -81,12 +90,14 @@ Remember to:
 // ElevenLabs caps a single request; anything past this is dropped by the API.
 const TTS_CHAR_LIMIT = 5000;
 
-// Strip speaker labels and flatten the dialogue into narration text.
+// Flatten the script into one narration string. The speaker-label strip stays
+// as a guard: the prompt no longer asks for dialogue, but a model that ignores
+// it would otherwise have "ALEX colon" read out loud.
 function toNarrationText(script: string): string {
   return script
     .split("\n")
     .filter((line) => line.trim())
-    .map((line) => line.replace(/^(ALEX|SAM):\s*/i, ""))
+    .map((line) => line.replace(/^[A-Z][A-Z ]{1,20}:\s*/, ""))
     .join(" ");
 }
 
@@ -134,6 +145,37 @@ async function synthesizeWithElevenLabs(
   }
 }
 
+/**
+ * Upload synthesized audio to Convex storage as the calling user.
+ *
+ * @returns the storage id, or null if the upload could not be performed — the
+ * caller then persists a script-only overview rather than failing outright.
+ */
+async function storeAudio(audio: ArrayBuffer): Promise<string | null> {
+  const client = await authedConvexClient();
+  if (!client) return null;
+
+  try {
+    const uploadUrl = await client.mutation(
+      api.documents.generateUploadUrl,
+      {}
+    );
+
+    const response = await fetch(uploadUrl, {
+      method: "POST",
+      headers: { "Content-Type": "audio/mpeg" },
+      body: audio,
+    });
+
+    if (!response.ok) return null;
+
+    const { storageId } = await response.json();
+    return storageId as string;
+  } catch {
+    return null;
+  }
+}
+
 // Script generation plus TTS regularly runs past a minute.
 export const maxDuration = 300;
 
@@ -143,13 +185,36 @@ export async function POST(request: NextRequest) {
   const { errorResponse } = await requireApiAuth();
   if (errorResponse) return errorResponse;
 
+  // The tightest budget of the three — ~$0.30 of ElevenLabs per call.
+  const limited = await enforceRateLimit("audio");
+  if (limited) return limited;
+
   try {
     const body: AudioOverviewRequest = await request.json();
-    const { notebookId, notebookTitle, documents, duration = "medium" } = body;
+    const { notebookId, notebookTitle, duration = "medium" } = body;
 
-    if (!notebookId || !documents || documents.length === 0) {
+    if (!notebookId) {
       return NextResponse.json(
-        { error: "Notebook ID and documents are required" },
+        { error: "Notebook ID is required" },
+        { status: 400 }
+      );
+    }
+
+    // A session only proves the caller is *some* user, and this route writes an
+    // overview row under the notebook it is handed (AUDIT.md §4.7).
+    const notOwner = await requireNotebookOwner(notebookId);
+    if (notOwner) return notOwner;
+
+    // Source text is read from Convex, never taken from the request body — the
+    // client used to post every document's full content, which meant the route
+    // narrated whatever the caller supplied under any notebook id it liked.
+    const documents = (await notebookDocuments(notebookId))
+      .filter((doc) => (doc.content?.length ?? 0) > MIN_CONTENT_CHARS)
+      .map((doc) => ({ name: doc.name, content: doc.content ?? "" }));
+
+    if (documents.length === 0) {
+      return NextResponse.json(
+        { error: "No source in this notebook has enough text to narrate" },
         { status: 400 }
       );
     }
@@ -162,17 +227,17 @@ export async function POST(request: NextRequest) {
     );
 
     // Step 2: Synthesize audio with ElevenLabs
-    let audioBase64: string | null = null;
-    const audioFormat = "mp3";
-
     const narrationText = toNarrationText(script);
     const spokenText = narrationText.slice(0, TTS_CHAR_LIMIT);
     const isTruncated = narrationText.length > TTS_CHAR_LIMIT;
 
     const audio = await synthesizeWithElevenLabs(narrationText);
-    if (audio) {
-      audioBase64 = Buffer.from(audio).toString("base64");
-    }
+
+    // Step 3: Store the MP3 and return only its id. Returning base64 meant a
+    // ~4 MB JSON body — at or over Vercel's 4.5 MB response limit — and the
+    // audio was lost on refresh because nothing ever persisted it. AUDIT.md
+    // §4.2.
+    const storageId = audio ? await storeAudio(audio) : null;
 
     // Duration must describe what was actually synthesized, not the full
     // script — the two diverge whenever the script is longer than one
@@ -183,16 +248,18 @@ export async function POST(request: NextRequest) {
       success: true,
       notebookId,
       script,
-      audio: audioBase64
+      audio: storageId
         ? {
-            data: audioBase64,
-            format: audioFormat,
+            storageId,
+            format: "mp3",
             available: true,
             truncated: isTruncated,
           }
         : {
             available: false,
-            message: "Audio synthesis failed",
+            message: audio
+              ? "Audio was generated but could not be saved"
+              : "Audio synthesis failed",
           },
       wordCount: wordsAt(script),
       // ~150 words per minute, measured over the narrated portion only.

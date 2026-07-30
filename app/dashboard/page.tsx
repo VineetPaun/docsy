@@ -7,7 +7,6 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { UserSync } from "@/components/user-sync";
 import { useConvexAvailable } from "@/components/providers/convex-provider";
 import { mockNotebooks } from "@/lib/mock-data";
 import {
@@ -38,7 +37,7 @@ export default function DashboardPage() {
   // Only use Convex hooks when available
   const convexNotebooks = useQuery(
     api.notebooks.getNotebooks,
-    isConvexAvailable && user ? { clerkId: user.id } : "skip"
+    isConvexAvailable && user ? {} : "skip"
   ) as Notebook[] | undefined;
 
   const createNotebookMutation = useMutation(api.notebooks.createNotebook);
@@ -67,7 +66,6 @@ export default function DashboardPage() {
     if (isConvexAvailable) {
       try {
         await createNotebookMutation({
-          clerkId: user.id,
           title: newTitle.trim(),
         });
         setNewTitle("");
@@ -96,7 +94,6 @@ export default function DashboardPage() {
     if (isConvexAvailable) {
       try {
         await deleteNotebookMutation({
-          clerkId: user.id,
           notebookId: notebookId as never,
         });
         toast.success("Notebook deleted");
@@ -121,8 +118,9 @@ export default function DashboardPage() {
   if (!isLoaded) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <div className="flex items-center gap-2">
+        <div role="status" className="flex items-center gap-2">
           <svg
+            aria-hidden="true"
             className="size-5 animate-spin text-muted-foreground"
             xmlns="http://www.w3.org/2000/svg"
             fill="none"
@@ -166,7 +164,6 @@ export default function DashboardPage() {
 
   return (
     <>
-      <UserSync />
       <div className="min-h-screen bg-background">
         {/* Header */}
         <header className="sticky top-0 z-50 border-b border-border/40 bg-background/80 backdrop-blur-xl">

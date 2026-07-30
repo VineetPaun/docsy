@@ -31,33 +31,30 @@ export function DocumentDropzone() {
   const createDocument = useMutation(api.documents.createDocument);
   const generateUploadUrl = useMutation(api.documents.generateUploadUrl);
 
+  /**
+   * Extract a file's text via the server.
+   *
+   * Every type goes through `/api/process-document` — that route sniffs the
+   * magic bytes, so reading a `.txt` locally would skip the only real type
+   * check (AUDIT.md §3.5). Throws rather than returning "", so a file the
+   * server cannot identify never becomes a notebook.
+   */
   const extractTextFromFile = async (file: File): Promise<string> => {
-    const type = ACCEPTED_TYPES[file.type as keyof typeof ACCEPTED_TYPES];
+    const formData = new FormData();
+    formData.append("file", file);
 
-    // For text files, read directly
-    if (type === "txt" || type === "md") {
-      return await file.text();
+    const response = await fetch("/api/process-document", {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const { error } = await response.json().catch(() => ({ error: "" }));
+      throw new Error(error || "Failed to process document");
     }
 
-    // For PDF and DOCX, use the server-side processing API
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const response = await fetch("/api/process-document", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to process document");
-      }
-
-      const data = await response.json();
-      return data.content || "";
-    } catch {
-      return "";
-    }
+    const data = await response.json();
+    return data.content || "";
   };
 
   const processFile = async (file: File) => {
@@ -74,18 +71,18 @@ export function DocumentDropzone() {
 
     try {
       setIsProcessing(true);
-      setStatus("Creating your notebook...");
-
-      // 1. Create Notebook
-      const notebookId = await createNotebook({
-        clerkId: user.id,
-        title: file.name.split(".")[0] || "New Notebook",
-      });
-
       setStatus(`Processing ${file.name}...`);
 
-      // 2. Extract Text
+      // 1. Extract text. First, because it is the step that rejects a file —
+      // creating the notebook ahead of it left an empty one behind on failure.
       const content = await extractTextFromFile(file);
+
+      setStatus("Creating your notebook...");
+
+      // 2. Create Notebook
+      const notebookId = await createNotebook({
+        title: file.name.split(".")[0] || "New Notebook",
+      });
 
       // 3. Upload File
       setStatus("Uploading...");
@@ -102,7 +99,6 @@ export function DocumentDropzone() {
       // 4. Create Document Record
       const docId = await createDocument({
         notebookId,
-        clerkId: user.id,
         name: file.name,
         type: ACCEPTED_TYPES[file.type as keyof typeof ACCEPTED_TYPES],
         content,
@@ -128,8 +124,12 @@ export function DocumentDropzone() {
 
       setStatus("Done! Redirecting...");
       router.push(`/notebook/${notebookId}`);
-    } catch {
-      setStatus("Something went wrong. Please try again.");
+    } catch (error) {
+      setStatus(
+        error instanceof Error && error.message
+          ? error.message
+          : "Something went wrong. Please try again."
+      );
       setIsProcessing(false);
     }
   };
@@ -152,8 +152,12 @@ export function DocumentDropzone() {
 
   return (
     <div className="w-full space-y-8">
+      {/*
+        Drop target for the mouse; the file input below is the keyboard path
+        (AUDIT.md §9.4). No onClick here — the overlay label already opens the
+        picker, and a second handler on the ancestor opened it twice.
+      */}
       <div
-        onClick={() => fileInputRef.current?.click()}
         onDragOver={(e) => {
           e.preventDefault();
           setIsDragging(true);
@@ -165,19 +169,37 @@ export function DocumentDropzone() {
         onDrop={handleDrop}
         className={cn(
           "group relative mx-auto h-64 w-full cursor-pointer overflow-hidden rounded-xl border-2 border-dashed transition-all duration-300",
+          // The keyboard path focuses the input, which is visually hidden, so
+          // the ring has to be drawn by the zone around it.
+          "focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2",
           isDragging
             ? "border-primary bg-primary/5 scale-[1.01] shadow-xl"
             : "border-muted-foreground/25 bg-background/50 hover:border-primary/50 hover:bg-muted/50",
           isProcessing && "pointer-events-none opacity-80"
         )}
       >
+        {/*
+          `sr-only`, not `hidden`: a display:none input is unreachable by
+          keyboard, which left this zone mouse-only.
+        */}
         <input
+          id="landing-document-input"
           type="file"
           ref={fileInputRef}
-          className="hidden"
+          className="sr-only"
           accept=".pdf,.docx,.doc,.txt,.md"
           onChange={handleFileInput}
         />
+
+        {/* Makes the whole zone a click target for the input above. */}
+        <label
+          htmlFor="landing-document-input"
+          className="absolute inset-0 z-30 cursor-pointer"
+        >
+          <span className="sr-only">
+            Choose a document to upload — PDF, DOCX, TXT or Markdown
+          </span>
+        </label>
 
         {/* Center Action Area (Always visible but enhanced on hover/drag) */}
         <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-4 text-center transition-all duration-300">
@@ -188,7 +210,11 @@ export function DocumentDropzone() {
             )}
           >
             {isProcessing ? (
-              <div className="size-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              <div
+                role="status"
+                aria-label="Processing your document"
+                className="size-8 animate-spin rounded-full border-2 border-primary border-t-transparent"
+              />
             ) : (
               <svg
                 xmlns="http://www.w3.org/2000/svg"

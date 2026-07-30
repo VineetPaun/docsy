@@ -102,19 +102,32 @@ export function DocumentPreview({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-2 backdrop-blur-sm sm:p-4 bg-black/50"
       onClick={handleBackdropClick}
     >
+      {/*
+        Hand-rolled dialog semantics. Focus is not trapped here — that comes
+        with the move to shadcn's `Dialog`, which also deletes the escape and
+        backdrop handlers above (AUDIT.md §9.4).
+      */}
       <div
         ref={modalRef}
-        className="relative flex h-[85vh] w-[90vw] max-w-4xl flex-col rounded-xl border border-border bg-background shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="document-preview-title"
+        className="relative flex h-[92dvh] w-full max-w-4xl flex-col rounded-xl border border-border bg-background shadow-2xl sm:h-[85dvh] sm:w-[90vw]"
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-border/40 px-6 py-4">
-          <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between gap-2 border-b border-border/40 px-4 py-3 sm:px-6 sm:py-4">
+          <div className="flex min-w-0 items-center gap-3">
             {getFileIcon(document.type)}
-            <div>
-              <h2 className="font-semibold">{document.name}</h2>
+            <div className="min-w-0">
+              <h2
+                id="document-preview-title"
+                className="truncate font-semibold"
+              >
+                {document.name}
+              </h2>
               <p className="text-xs text-muted-foreground">
                 Added {formatDate(document.createdAt)}
                 {highlightRange?.pageNumber && (
@@ -136,9 +149,11 @@ export function DocumentPreview({
             </span>
             <button
               onClick={onClose}
+              aria-label="Close the preview"
               className="rounded-lg p-2 hover:bg-muted transition-colors"
             >
               <svg
+                aria-hidden="true"
                 xmlns="http://www.w3.org/2000/svg"
                 viewBox="0 0 24 24"
                 fill="none"

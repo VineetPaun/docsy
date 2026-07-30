@@ -1,16 +1,13 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
+import type { Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
+import { getUser, requireOwnedNotebook, requireUser } from "./lib/auth";
 
 // Get audio overview for a notebook
 export const getAudioOverview = query({
-  args: { notebookId: v.id("notebooks"), clerkId: v.string() },
-  handler: async (ctx: any, args: any) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerk_id", (q: any) => q.eq("clerkId", args.clerkId))
-      .first();
-
+  args: { notebookId: v.id("notebooks") },
+  handler: async (ctx, args) => {
+    const user = await getUser(ctx);
     if (!user) {
       return null;
     }
@@ -24,14 +21,26 @@ export const getAudioOverview = query({
     // Get the latest audio overview for this notebook
     const audioOverviews = await ctx.db
       .query("audioOverviews")
-      .withIndex("by_notebook", (q: any) => q.eq("notebookId", args.notebookId))
+      .withIndex("by_notebook", (q) => q.eq("notebookId", args.notebookId))
       .collect();
 
-    // Return the most recent one
-    return (
-      audioOverviews.sort((a: any, b: any) => b.createdAt - a.createdAt)[0] ||
-      null
-    );
+    const latest =
+      audioOverviews.sort((a, b) => b.createdAt - a.createdAt)[0] || null;
+
+    if (!latest) {
+      return null;
+    }
+
+    // Resolve the storage id to a signed URL here rather than exposing another
+    // query: ownership has already been established above, and the player only
+    // ever needs the URL. Previously nothing read `audioStorageId` at all, so
+    // audio vanished on refresh (AUDIT.md §4.2).
+    return {
+      ...latest,
+      audioUrl: latest.audioStorageId
+        ? await ctx.storage.getUrl(latest.audioStorageId as Id<"_storage">)
+        : null,
+    };
   },
 });
 
@@ -39,37 +48,33 @@ export const getAudioOverview = query({
 export const createAudioOverview = mutation({
   args: {
     notebookId: v.id("notebooks"),
-    clerkId: v.string(),
     status: v.string(),
     scriptText: v.optional(v.string()),
     audioStorageId: v.optional(v.string()),
     duration: v.optional(v.number()),
     errorMessage: v.optional(v.string()),
   },
-  handler: async (ctx: any, args: any) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerk_id", (q: any) => q.eq("clerkId", args.clerkId))
-      .first();
-
-    if (!user) {
-      throw new Error("User not found");
-    }
-
-    // Verify notebook belongs to user
-    const notebook = await ctx.db.get(args.notebookId);
-    if (!notebook || notebook.userId !== user._id) {
-      throw new Error("Notebook not found");
-    }
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    await requireOwnedNotebook(ctx, user, args.notebookId);
 
     // Check if there's an existing overview for this notebook
     const existingOverviews = await ctx.db
       .query("audioOverviews")
-      .withIndex("by_notebook", (q: any) => q.eq("notebookId", args.notebookId))
+      .withIndex("by_notebook", (q) => q.eq("notebookId", args.notebookId))
       .collect();
 
-    // Delete old overviews (keep only the new one)
+    // Delete old overviews (keep only the new one), including their audio
+    // files — now that audio is actually persisted, dropping the row alone
+    // would leak a paid MP3 on every regeneration.
     for (const existing of existingOverviews) {
+      if (existing.audioStorageId) {
+        try {
+          await ctx.storage.delete(existing.audioStorageId as Id<"_storage">);
+        } catch {
+          // Already gone, or never a valid id — the row still must go.
+        }
+      }
       await ctx.db.delete(existing._id);
     }
 
@@ -94,26 +99,18 @@ export const createAudioOverview = mutation({
 export const updateAudioOverview = mutation({
   args: {
     overviewId: v.id("audioOverviews"),
-    clerkId: v.string(),
     status: v.optional(v.string()),
     scriptText: v.optional(v.string()),
     audioStorageId: v.optional(v.string()),
     duration: v.optional(v.number()),
     errorMessage: v.optional(v.string()),
   },
-  handler: async (ctx: any, args: any) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerk_id", (q: any) => q.eq("clerkId", args.clerkId))
-      .first();
-
-    if (!user) {
-      throw new Error("User not found");
-    }
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
 
     const overview = await ctx.db.get(args.overviewId);
     if (!overview || overview.userId !== user._id) {
-      throw new Error("Audio overview not found");
+      throw new ConvexError("Audio overview not found");
     }
 
     const updates: Record<string, unknown> = {};
@@ -132,20 +129,22 @@ export const updateAudioOverview = mutation({
 
 // Delete audio overview
 export const deleteAudioOverview = mutation({
-  args: { overviewId: v.id("audioOverviews"), clerkId: v.string() },
-  handler: async (ctx: any, args: any) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerk_id", (q: any) => q.eq("clerkId", args.clerkId))
-      .first();
-
-    if (!user) {
-      throw new Error("User not found");
-    }
+  args: { overviewId: v.id("audioOverviews") },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
 
     const overview = await ctx.db.get(args.overviewId);
     if (!overview || overview.userId !== user._id) {
-      throw new Error("Audio overview not found");
+      throw new ConvexError("Audio overview not found");
+    }
+
+    // The MP3 goes with the row, or it is paid storage nobody can reach.
+    if (overview.audioStorageId) {
+      try {
+        await ctx.storage.delete(overview.audioStorageId as Id<"_storage">);
+      } catch {
+        // Already gone.
+      }
     }
 
     await ctx.db.delete(args.overviewId);

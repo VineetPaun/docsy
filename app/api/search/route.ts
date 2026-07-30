@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateEmbedding } from "@/lib/embeddings";
 import { searchChunks } from "@/lib/qdrant";
 import { requireApiAuth } from "@/lib/api-auth";
+import { requireNotebookOwner } from "@/lib/convex-server";
 
 interface SearchRequest {
   query: string;
@@ -11,8 +12,6 @@ interface SearchRequest {
 }
 
 export async function POST(request: NextRequest) {
-  // TODO (AUDIT.md §3.2): also verify the caller owns `notebookId`. Requires
-  // the Convex auth refactor in §3.1 to be able to trust an ownership lookup.
   const { errorResponse } = await requireApiAuth();
   if (errorResponse) return errorResponse;
 
@@ -26,6 +25,10 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    // A session alone would let any user search another user's notebook.
+    const notOwner = await requireNotebookOwner(notebookId);
+    if (notOwner) return notOwner;
 
     // Check for API key
     const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;

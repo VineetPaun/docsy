@@ -1,0 +1,37 @@
+# Typecheck, lint and unit tests on every push and PR (AUDIT.md §10).
+#
+# `next build` is deliberately absent: prerendering /_not-found initialises the
+# Clerk SDK, which needs a real NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY. Add it as a
+# repo secret and a build step here once one is available — a step that always
+# fails is worse than no step.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bunx tsc --noEmit
+
+      - name: Lint
+        run: bun run lint
+
+      # convex/_generated is committed, so this needs no Convex deployment.
+      - name: Unit tests
+        run: bun test

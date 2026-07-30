@@ -29,10 +29,17 @@ interface Document {
 
 interface SourcesPanelProps {
   notebookId: string;
-  clerkId: string;
   documents: Document[] | undefined;
   onDeleteDocument: (documentId: string) => void;
+  // Selection lives in the page, not here — the checkboxes drive both bulk
+  // delete and which sources chat retrieves from (AUDIT.md §4.5).
+  selectedDocs: Set<string>;
+  setSelectedDocs: React.Dispatch<React.SetStateAction<Set<string>>>;
 }
+
+// Upload UX bound only. The enforceable limit is MAX_DOCUMENTS_PER_NOTEBOOK in
+// convex/documents.ts — anything here is a suggestion the client can ignore.
+const MAX_FILES_PER_UPLOAD = 20;
 
 const ACCEPTED_TYPES = {
   "application/pdf": "pdf",
@@ -45,16 +52,14 @@ const ACCEPTED_TYPES = {
 
 export function SourcesPanel({
   notebookId,
-  clerkId,
   documents,
   onDeleteDocument,
+  selectedDocs,
+  setSelectedDocs,
 }: SourcesPanelProps) {
   const [isDragging, setIsDragging] = React.useState(false);
   const [isUploading, setIsUploading] = React.useState(false);
   const [uploadProgress, setUploadProgress] = React.useState("");
-  const [selectedDocs, setSelectedDocs] = React.useState<Set<string>>(
-    new Set()
-  );
   const [previewDoc, setPreviewDoc] = React.useState<Document | null>(null);
 
   // Web search state
@@ -71,7 +76,9 @@ export function SourcesPanel({
 
   // Audio overview state
   const [isGeneratingAudio, setIsGeneratingAudio] = React.useState(false);
-  const [audioData, setAudioData] = React.useState<string | undefined>();
+  // Audio itself is not held here — it lives in Convex storage and arrives as a
+  // URL on the reactive query. Only the script is mirrored locally, so it shows
+  // immediately after generation.
   const [audioScript, setAudioScript] = React.useState<string | undefined>();
   const [showAudioSection, setShowAudioSection] = React.useState(true);
 
@@ -93,35 +100,35 @@ export function SourcesPanel({
   // Query for existing audio overview
   const existingAudioOverview = useQuery(api.audioOverviews.getAudioOverview, {
     notebookId: notebookId as never,
-    clerkId,
   });
+  /**
+   * Extract a file's text via the server.
+   *
+   * Every type goes through `/api/process-document`, including plain text that
+   * the browser could read locally: that route is what sniffs the magic bytes,
+   * so reading a `.txt` here would skip the only real type check (AUDIT.md
+   * §3.5).
+   *
+   * Throws on rejection — an unreadable or unidentifiable file must not be
+   * stored, and the server's message says why (unsupported type, scanned PDF,
+   * no readable text).
+   */
   const extractTextFromFile = async (file: File): Promise<string> => {
-    const type = ACCEPTED_TYPES[file.type as keyof typeof ACCEPTED_TYPES];
+    const formData = new FormData();
+    formData.append("file", file);
 
-    // For text files, read directly
-    if (type === "txt" || type === "md") {
-      return await file.text();
+    const response = await fetch("/api/process-document", {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const { error } = await response.json().catch(() => ({ error: "" }));
+      throw new Error(error || `Could not read ${file.name}`);
     }
 
-    // For PDF and DOCX, use the server-side processing API
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const response = await fetch("/api/process-document", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to process document");
-      }
-
-      const data = await response.json();
-      return data.content;
-    } catch {
-      return `[Failed to extract content from ${file.name}]`;
-    }
+    const data = await response.json();
+    return data.content;
   };
 
   const handleWebSearch = async () => {
@@ -143,7 +150,7 @@ export function SourcesPanel({
       if (data.success && data.results) {
         setSearchResults(data.results);
       } else {
-        toast.error(`Search failed: ${data.message || "Unknown error"}`);
+        toast.error(`Search failed: ${data.error || "Unknown error"}`);
       }
     } catch {
       toast.error("Failed to perform web search");
@@ -160,7 +167,6 @@ export function SourcesPanel({
 
       const doc = await createDocument({
         notebookId: notebookId as never,
-        clerkId,
         name: result.title || "Web Result",
         type: "txt", // Treat as text file
         content,
@@ -229,7 +235,6 @@ export function SourcesPanel({
       // Create the document with the processed content
       const doc = await createDocument({
         notebookId: notebookId as never,
-        clerkId,
         name: data.title || url.hostname,
         type: docType,
         content: data.content,
@@ -284,36 +289,24 @@ export function SourcesPanel({
     }
 
     setIsGeneratingAudio(true);
-    setAudioData(undefined);
     setAudioScript(undefined);
 
     try {
       // Create a "generating" record
       await createAudioOverview({
         notebookId: notebookId as never,
-        clerkId,
         status: "generating",
       });
 
-      // Prepare documents for the overview
-      const validDocs = documents
-        .filter((doc) => doc.content && doc.content.length > 50)
-        .map((doc) => ({ name: doc.name, content: doc.content || "" }));
-
-      if (validDocs.length === 0) {
-        throw new Error(
-          "Not enough content in sources to generate an overview."
-        );
-      }
-
-      // Call the audio overview API
+      // Only the notebook id goes over the wire — the route reads the source
+      // text from Convex itself, and rejects a notebook with nothing to
+      // narrate (AUDIT.md §4.7).
       const response = await fetch("/api/audio-overview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           notebookId,
           notebookTitle: "Your Research",
-          documents: validDocs,
           duration: "short", // 3-5 minutes
         }),
       });
@@ -324,26 +317,27 @@ export function SourcesPanel({
         throw new Error(data.error || "Failed to generate audio overview");
       }
 
-      // Update the audio overview record
+      // Persist the storage id — the reactive query picks it up and resolves it
+      // to a playable URL, so nothing here holds the audio in memory.
       await createAudioOverview({
         notebookId: notebookId as never,
-        clerkId,
         status: data.audio?.available ? "ready" : "script_only",
         scriptText: data.script,
+        audioStorageId: data.audio?.storageId,
         duration: data.estimatedDuration,
       });
 
-      // Set local state for immediate display
       setAudioScript(data.script);
-      if (data.audio?.available && data.audio?.data) {
-        setAudioData(data.audio.data);
-      }
-      toast.success("Audio overview generated!");
+
+      toast.success(
+        data.audio?.available
+          ? "Audio overview generated!"
+          : `Script ready. ${data.audio?.message ?? "Audio unavailable"}.`
+      );
     } catch (error) {
       // Update record with error
       await createAudioOverview({
         notebookId: notebookId as never,
-        clerkId,
         status: "error",
         errorMessage: error instanceof Error ? error.message : "Unknown error",
       });
@@ -358,13 +352,11 @@ export function SourcesPanel({
     }
   };
 
-  // Load existing audio overview data when it changes
+  // Mirror a persisted script into local state. The audio URL is read straight
+  // from the query at render time — it needs no local copy.
   React.useEffect(() => {
-    if (existingAudioOverview) {
-      if (existingAudioOverview.scriptText) {
-        setAudioScript(existingAudioOverview.scriptText);
-      }
-      // Note: Audio data would need to be loaded from storage if we implement that
+    if (existingAudioOverview?.scriptText) {
+      setAudioScript(existingAudioOverview.scriptText);
     }
   }, [existingAudioOverview]);
 
@@ -377,16 +369,29 @@ export function SourcesPanel({
       return;
     }
 
+    // A 200-file drop would fire 200 sequential uploads and 200 embedding runs.
+    // The real ceiling is `MAX_DOCUMENTS_PER_NOTEBOOK` in `createDocument`,
+    // which the client cannot bypass; this is the friendly version of it.
+    if (validFiles.length > MAX_FILES_PER_UPLOAD) {
+      toast.error(`Please upload at most ${MAX_FILES_PER_UPLOAD} files at once.`);
+      return;
+    }
+
     setIsUploading(true);
-    try {
-      for (let i = 0; i < validFiles.length; i++) {
-        const file = validFiles[i];
+    let succeeded = 0;
+
+    // Per-file error handling: one unreadable file used to abort the whole
+    // batch, discarding files that had already been processed.
+    for (let i = 0; i < validFiles.length; i++) {
+      const file = validFiles[i];
+
+      try {
         setUploadProgress(
           `Processing ${i + 1}/${validFiles.length}: ${file.name}`
         );
-        const type = ACCEPTED_TYPES[file.type as keyof typeof ACCEPTED_TYPES];
 
-        // Extract text content (with server-side processing for PDF/DOCX)
+        // Before the upload, so a file the server cannot identify is never
+        // stored at all.
         const content = await extractTextFromFile(file);
 
         setUploadProgress(
@@ -402,20 +407,16 @@ export function SourcesPanel({
         const { storageId } = await result.json();
         const doc = await createDocument({
           notebookId: notebookId as never,
-          clerkId,
           name: file.name,
-          type,
+          type: ACCEPTED_TYPES[file.type as keyof typeof ACCEPTED_TYPES],
           content,
           storageId,
         });
 
         // Generate embeddings for the document (in background)
-        if (
-          content &&
-          content.length > 50 &&
-          !content.startsWith("[Failed") &&
-          !content.startsWith("[PDF content could not")
-        ) {
+        // No placeholder-string checks needed: extraction failure is a 422 that
+        // throws above, so reaching here means real text (AUDIT.md §4.10).
+        if (content.length > 50) {
           setUploadProgress(
             `Indexing ${i + 1}/${validFiles.length}: ${file.name}`
           );
@@ -434,13 +435,20 @@ export function SourcesPanel({
             // Continue even if embedding fails — the document is stored.
           }
         }
+
+        succeeded++;
+      } catch (error) {
+        const reason =
+          error instanceof Error ? error.message : "Please try again.";
+        toast.error(`${file.name}: ${reason}`);
       }
-      setUploadProgress("");
-      toast.success(`Uploaded ${validFiles.length} file(s) successfully`);
-    } catch {
-      toast.error("Failed to upload some files. Please try again.");
-    } finally {
-      setIsUploading(false);
+    }
+
+    setUploadProgress("");
+    setIsUploading(false);
+
+    if (succeeded > 0) {
+      toast.success(`Uploaded ${succeeded} file(s) successfully`);
     }
   };
 
@@ -579,25 +587,10 @@ export function SourcesPanel({
       }}
     >
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-border/40 px-4 py-3">
+      <div className="flex items-center justify-between border-b border-border/40 px-3 py-3 sm:px-4">
+        {/* The grid button that used to sit here had no onClick and no label —
+            a control that did nothing. Deleted rather than named. */}
         <h2 className="font-semibold">Sources</h2>
-        <button className="rounded p-1 hover:bg-muted">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="size-4"
-          >
-            <rect width="7" height="7" x="3" y="3" rx="1" />
-            <rect width="7" height="7" x="14" y="3" rx="1" />
-            <rect width="7" height="7" x="14" y="14" rx="1" />
-            <rect width="7" height="7" x="3" y="14" rx="1" />
-          </svg>
-        </button>
       </div>
 
       {/* Add Sources Button */}
@@ -714,7 +707,11 @@ export function SourcesPanel({
                 disabled={isProcessingUrl}
               />
               {isProcessingUrl && (
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                <div
+                  role="status"
+                  aria-label="Importing the URL"
+                  className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent"
+                />
               )}
             </div>
             <div className="flex items-center justify-between">
@@ -761,7 +758,11 @@ export function SourcesPanel({
               disabled={isSearching}
             />
             {isSearching && (
-              <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              <div
+                role="status"
+                aria-label="Searching the web"
+                className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent"
+              />
             )}
           </div>
 
@@ -913,9 +914,11 @@ export function SourcesPanel({
         {showAudioSection && (
           <div className="space-y-3">
             {/* Show existing audio or generate button */}
-            {audioData || audioScript || existingAudioOverview?.scriptText ? (
+            {existingAudioOverview?.audioUrl ||
+            audioScript ||
+            existingAudioOverview?.scriptText ? (
               <AudioPlayer
-                audioData={audioData}
+                audioUrl={existingAudioOverview?.audioUrl ?? undefined}
                 scriptText={audioScript || existingAudioOverview?.scriptText}
                 title="Audio Overview"
                 onRegenerate={handleGenerateAudioOverview}
@@ -1128,6 +1131,7 @@ export function SourcesPanel({
                     type="checkbox"
                     checked={selectedDocs.has(doc._id)}
                     onChange={() => toggleDocSelection(doc._id)}
+                    aria-label={`Include ${doc.name} in answers`}
                     className="size-4 rounded border-border"
                   />
                   {getFileIcon(doc.type)}
@@ -1152,9 +1156,13 @@ export function SourcesPanel({
                   </button>
                   <button
                     onClick={() => handleDeleteSingle(doc._id)}
-                    className="rounded p-1 opacity-0 transition-opacity hover:bg-destructive/10 group-hover:opacity-100"
+                    aria-label={`Delete ${doc.name}`}
+                    // `focus-visible` as well as `group-hover`, or the control
+                    // stays invisible for a keyboard user who has focused it.
+                    className="rounded p-1 opacity-0 transition-opacity hover:bg-destructive/10 group-hover:opacity-100 focus-visible:opacity-100"
                   >
                     <svg
+                      aria-hidden="true"
                       xmlns="http://www.w3.org/2000/svg"
                       viewBox="0 0 24 24"
                       fill="none"

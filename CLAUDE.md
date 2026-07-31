@@ -40,7 +40,7 @@ bun run lint         # eslint
 
 CI (`.github/workflows/ci.yml`) runs `tsc --noEmit`, `eslint` and `bun test` on push and PR — not `next build`, which needs a real Clerk key.
 
-`bun test` runs the three test files that exist (`lib/qdrant.test.ts` — page-number attribution; `lib/file-type.test.ts` — magic-byte sniffing; `lib/rate-limit.test.ts` — fixed-window maths). There is **no broader suite**, so passing tests are never evidence a feature works end-to-end.
+`bun test` runs the five test files that exist (`lib/qdrant.test.ts` — page-number attribution; `lib/file-type.test.ts` — magic-byte sniffing; `lib/rate-limit.test.ts` — fixed-window maths; `lib/embeddings.test.ts` — retry predicate; `lib/openrouter.test.ts` — model catalogue filter). There is **no broader suite**, so passing tests are never evidence a feature works end-to-end.
 
 ## ⚠️ Read before writing code
 
@@ -62,6 +62,8 @@ These are the traps that cause agents to do the wrong thing here.
 
 **5c. A new file in `convex/` won't typecheck until codegen runs.** `convex/_generated/api.d.ts` lists modules explicitly, so `internal.myNewModule.foo` is a type error until `bunx convex dev` regenerates it — and codegen needs a configured deployment. Adding an export to an *existing* module works immediately. `convex/http.ts` is exempt (it is found by convention, not through `api`). This is why `purgeVectors` lives in `convex/documents.ts` rather than its own `cleanup.ts`.
 
+**5c-2. No hyphens in `convex/` filenames.** Convex rejects the whole push, not just the file: `InvalidConfig: lib/rate-limit-window.js is not a valid path to a Convex module`. Path components allow only alphanumerics, underscores and periods, so `convex/` uses camelCase (`rateLimitWindow.ts`) while `lib/` outside it stays kebab-case. Renaming does *not* break `bun test` — the test imports the path directly, not through `api`.
+
 **5d. Uploads are typed by their bytes.** `lib/file-type.ts` `sniffFileType()` decides; `file.type` is browser-supplied and ignored. **Every** upload path — including plain text, which the browser could read locally — must go through `/api/process-document`, because that route is where the sniff happens. Adding a client-side shortcut to "save a round trip" reopens the hole. Both dropzones (`sources-panel.tsx`, `landing/document-dropzone.tsx`) carry near-duplicate copies of `extractTextFromFile`; fix bugs in both.
 
 **5e. Four env vars live on the Convex deployment, not in `.env.local`.** `CLERK_JWT_ISSUER_DOMAIN`, `CLERK_WEBHOOK_SECRET`, `QDRANT_URL`, `QDRANT_API_KEY` (`bunx convex env set …`). Each fails silently and differently — `AUDIT.md` §3.1 has the symptom table. The two that bite hardest: no registered Clerk webhook → **no `users` row is ever created, so every mutation throws "User not provisioned"**; no `QDRANT_URL` on Convex → deletes look fine but vectors survive and deleted docs return as ghost citations.
@@ -74,9 +76,10 @@ These are the traps that cause agents to do the wrong thing here.
 
 ```
 app/
-  api/                  8 route handlers — all require a Clerk session; search,
+  api/                  9 route handlers — all require a Clerk session; search,
                         embeddings, chat and audio-overview also verify
-                        notebook/document ownership via lib/convex-server.ts
+                        notebook/document ownership via lib/convex-server.ts.
+                        models/ serves the live OpenRouter catalogue to the picker
   dashboard/            notebook list
   notebook/[id]/        main app: sources panel (left) + chat (right)
   sign-in|sign-up|...   Clerk auth pages
@@ -97,7 +100,8 @@ convex/
                         never a user id from args
   lib/cascade.ts        purgeDocument / purgeNotebook — every delete path goes
                         through here, or something gets orphaned
-  lib/rate-limit-window.ts  pure window decision, tested from lib/rate-limit.test.ts
+  lib/rateLimitWindow.ts    pure window decision, tested from lib/rate-limit.test.ts
+                        (camelCase: Convex rejects hyphens in module paths)
   *.ts                  schema + queries/mutations
 lib/
   api-auth.ts           requireApiAuth() — the 401 guard every route calls
@@ -109,8 +113,13 @@ lib/
   file-type.ts          sniffFileType() — magic bytes decide an upload's type;
                         file.type is never trusted
   mock-data.ts          dashboard placeholders when Convex isn't configured
-  openrouter.ts         model catalogue (hardcoded, stale) + chat call
-  embeddings.ts         Gemini embeddings — deprecated SDK, see AUDIT.md §5.1
+  openrouter.ts         catalogue fetched from OpenRouter (1h cache) + chat call.
+                        resolveModel() is the server-side gate on which model a
+                        request may use — never trust a body-supplied slug
+  embeddings.ts         Gemini embeddings (@google/genai, gemini-embedding-001
+                        at 768 dims, retried on 429). Changing the model or the
+                        dimensionality means bumping the Qdrant collection
+                        version in BOTH lib/qdrant.ts and convex/documents.ts
   qdrant.ts             vector store + chunking
 ```
 
@@ -140,3 +149,17 @@ lib/
 | [ROADMAP.md](ROADMAP.md) | Post-remediation product strategy. Proposals, not defects — several mutually exclusive. Needs the §7 decisions answered by a human before implementing anything. |
 
 Both were written against `4d9decb`. If `git log --oneline 4d9decb..HEAD` shows commits, re-read cited lines before trusting either.
+
+<!-- convex-ai-start -->
+
+This project uses [Convex](https://convex.dev) as its backend.
+
+When working on Convex code, **always read
+`convex/_generated/ai/guidelines.md` first** for important guidelines on
+how to correctly use Convex APIs and patterns. The file contains rules that
+override what you may have learned about Convex from training data.
+
+Convex agent skills for common tasks can be installed by running
+`npx convex ai-files install`.
+
+<!-- convex-ai-end -->

@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { chatWithOpenRouter, type ChatMessage } from "@/lib/openrouter";
+import {
+  chatWithOpenRouter,
+  resolveModel,
+  type ChatMessage,
+} from "@/lib/openrouter";
 import { requireApiAuth } from "@/lib/api-auth";
 import {
   authedConvexClient,
@@ -75,9 +79,11 @@ Remember to:
     { role: "user", content: userPrompt },
   ];
 
+  // Was pinned to `meta-llama/llama-3.3-70b-instruct:free`, a slug OpenRouter
+  // has since retired — every audio overview failed on it (AUDIT.md §5.6).
   const script = await chatWithOpenRouter(
     messages,
-    "meta-llama/llama-3.3-70b-instruct:free",
+    await resolveModel(),
     {
       temperature: 0.8,
       maxTokens: 4000,

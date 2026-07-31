@@ -8,8 +8,11 @@ import {
 } from "./lib/auth";
 import { purgeDocument } from "./lib/cascade";
 
-// Must match COLLECTION_NAME in lib/qdrant.ts.
-const VECTOR_COLLECTION = "docsy_documents";
+// Must match COLLECTION_NAME in lib/qdrant.ts — including its version suffix,
+// or deletes purge points from a collection nothing writes to. Duplicated
+// rather than imported: importing it would pull the Qdrant REST client into the
+// Convex bundle for the sake of one string.
+const VECTOR_COLLECTION = "docsy_documents_v2";
 
 // Storage, embedding and retrieval all cost per source. Without a ceiling one
 // account can drive unbounded spend on a notebook nobody reads.

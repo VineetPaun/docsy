@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   chatWithOpenRouter,
-  DEFAULT_MODEL,
-  isValidModel,
+  resolveModel,
   type ChatMessage,
 } from "@/lib/openrouter";
 import { generateEmbedding } from "@/lib/embeddings";
@@ -82,7 +81,7 @@ export async function POST(request: NextRequest) {
       notebookId,
       notebookTitle,
       documentIds = [],
-      model = DEFAULT_MODEL,
+      model,
       useRAG = true,
     } = body;
 
@@ -110,8 +109,9 @@ export async function POST(request: NextRequest) {
     const selectedIds =
       documentIds.length > 0 ? documents.map((d) => d._id) : [];
 
-    // Validate model - use isValidModel helper
-    const selectedModel = isValidModel(model) ? model : DEFAULT_MODEL;
+    // Resolved against the live catalogue: a retired slug or one the caller
+    // invented becomes the default instead of a 400 from OpenRouter.
+    const selectedModel = await resolveModel(model);
 
     // Get the latest user message
     const userMessage = messages[messages.length - 1]?.content || "";

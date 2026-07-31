@@ -44,6 +44,8 @@ Bare record of what has been removed, so nobody re-audits it as a fresh finding.
 | 2026-07-29 | §9.1 — notebook page had zero responsive breakpoints | `app/notebook/[id]/page.tsx` — shadcn `Tabs` switch sources/chat below `md`, side by side above, both panels `forceMount` so switching keeps state; `h-screen` → `h-dvh`; header truncates; model dropdown's `min-w-[400px]` capped to the viewport; citation dialog fits a phone |
 | 2026-07-29 | §10 — no CI | `.github/workflows/ci.yml` — `tsc --noEmit`, `eslint`, `bun test` on push and PR. `next build` deliberately excluded until a Clerk publishable key exists as a repo secret |
 | 2026-07-30 | §3.4 — no rate limiting anywhere | `lib/rate-limit.ts` `enforceRateLimit()` on `/api/chat`, `/api/research`, `/api/audio-overview` → 429 + `Retry-After`. Counter is a Convex table (`rateLimits`) + `users.consumeRateLimit`, so no new service and **no new env var**; budgets (60/10/5 per hour) are server-side in `convex/users.ts` — an earlier shape passed `limit`/`windowMs` as args, which let a caller reset their own window. Window maths covered by `lib/rate-limit.test.ts`. Fails closed. **Limits are a guess — tune them** |
+| 2026-07-30 | §5.1 — deprecated `@google/generative-ai` + `text-embedding-004`, no retry | `lib/embeddings.ts` rewritten on `@google/genai` + `gemini-embedding-001` (`outputDimensionality: 768`), `RETRIEVAL_DOCUMENT` / `RETRIEVAL_QUERY` task types, one `embedContent` call per batch with exponential backoff on 429/5xx (`lib/embeddings.test.ts`). Qdrant collection versioned to `docsy_documents_v2` — the vector space changed, so old points are not comparable. **Re-indexing and a runtime check remain — see §5.1** |
+| 2026-07-30 | §5.6 — hardcoded model catalogue, 16 of 19 slugs dead | `lib/openrouter.ts` fetches `GET /api/v1/models` (1h cache) → free models + `PREMIUM_ALLOWLIST`, `resolveModel()` validates server-side, `/api/models` feeds the picker, `OPENROUTER_MODELS` / `isValidModel` / `VALID_MODEL_IDS` deleted. `ModelId` is now `string`; the client no longer validates. Filter and mapping covered by `lib/openrouter.test.ts`. **Two hand-kept lists remain — see §5.6** |
 | 2026-07-30 | §4.7 — `/api/audio-overview` took its source text from the request body and never checked ownership | route calls `requireNotebookOwner()` then `notebookDocuments()`; `documents` is gone from `AudioOverviewRequest`, and the client posts a notebook id only. A notebook with nothing narratable is a 400 from the route rather than a client-side guard |
 | 2026-07-30 | §4.4 — the "two-host podcast" was read by one voice | the prompt now writes a single-narrator episode; the `ALEX:`/`SAM:` label strip stays as a guard against a model that ignores it. Two voices is a feature, and belongs with §4.3 |
 | 2026-07-30 | §6.6 — demo mode faked output when keys were missing | `generateDemoResponse`, `generateDemoResults` and `generateDemoReport` deleted (~300 lines); `/api/chat`, `/api/web-search` and `/api/research` return **503 naming the missing variable**. No `NEXT_PUBLIC_DEMO_MODE` flag was added — no caller read `isDemo`, so nothing wanted the mode kept |
@@ -107,7 +109,7 @@ bun run lint        # eslint
 | **[verify]** | **From model knowledge, not checked against a live source.** All package-version and library-capability claims. Confirm with `bun outdated` or the vendor's docs before acting. |
 | "may already be broken" | An inference from dates, not an observed failure. Test it. |
 
-Collected `[verify]` items, so you don't have to hunt: §5.1 (Google SDK deprecation timing), §5.6 (specific OpenRouter model slugs), and Qdrant multivector support in `ROADMAP.md` §2.1. §5.7 was a `[verify]` item and is now confirmed against `bun outdated`.
+Collected `[verify]` items, so you don't have to hunt: Qdrant multivector support in `ROADMAP.md` §2.1. §5.7 was confirmed against `bun outdated`; §5.6's model slugs were confirmed against the live OpenRouter catalogue on 2026-07-30 (16 of 19 were dead), and §5.1's SDK swap is done.
 
 ### 0.5 Complete environment variable inventory
 
@@ -161,7 +163,7 @@ The problem is that it was built fast and never hardened. At the time of the aud
 | Feature breadth | **A−** | Ambitious and mostly delivered |
 | Security | **B−** | IDOR closed, routes check ownership, rate limits in place; unproven at runtime, no storage quota |
 | Data integrity | **D** | Deletes leave orphans everywhere; audio never persisted |
-| Dependency health | **C** | 2 deprecated SDKs, 1 abandoned parser |
+| Dependency health | **B** | Deprecated Google SDK replaced; 3 packages pinned back on upstream blockers (§5.7) |
 | RAG quality | **C** | Works, but naive — no reranking, no hybrid, top-5 fixed |
 | Code quality | **B−** | 1200-line god component remains; `console.*` and `any` now effectively zero |
 | Testing / CI | **D** | 3 unit test files + CI on push/PR; no integration or E2E coverage |
@@ -172,7 +174,7 @@ The problem is that it was built fast and never hardened. At the time of the aud
 
 1. **Set the four Convex-side env vars and confirm `ctx.auth.getUserIdentity()` is non-null** (§3.1). Everything below assumes this, and nothing works without it
 2. **Register the Clerk webhook** — until it exists, no `users` row is ever created and new signups cannot use the app (§3.1)
-3. **Replace `@google/generative-ai` + `text-embedding-004`** — deprecated, may already be dead (§5.1). Test this before anything else in Phase 1
+3. **Confirm embeddings actually produce vectors** in `docsy_documents_v2` after the SDK swap, and re-upload anything indexed before it (§5.1). Until that is checked, chat quietly answers from raw text (§4.6)
 
 ---
 
@@ -324,48 +326,28 @@ Nothing writes them any more — `updateNotebook` no longer accepts `canvasConte
 
 ## 5. Deprecated, outdated, and dead dependencies
 
-### 5.1 🔴 `@google/generative-ai` is deprecated **[verify]**
+### 5.1 🟠 The embedding swap has never run
 
-Google retired the legacy `@google/generative-ai` JS SDK in favour of **`@google/genai`**; the old package stopped receiving support in 2025. You use it in `lib/embeddings.ts` for all embedding generation. Note that `0.24.1` **is** the latest published version — updating dependencies does not help here; only the package swap below does.
+`lib/embeddings.ts` is on `@google/genai` + `gemini-embedding-001` at `outputDimensionality: 768`, with document/query task types and retry-with-backoff around each batch. `@google/generative-ai` is uninstalled.
 
-Worse: the model is **`text-embedding-004`** (`lib/embeddings.ts:3`), a legacy embedding model superseded by **`gemini-embedding-001`**. Google scheduled the legacy embedding endpoints for shutdown around **January 2026** — given today is July 2026, **your embedding pipeline may already be returning errors**. Test this first; if embeddings are silently failing, every upload since then has produced zero vectors and RAG has been quietly falling back to full-document stuffing.
+**What remains, and it is not small:**
 
-```bash
-bun remove @google/generative-ai && bun add @google/genai
-```
-
-```ts
-// lib/embeddings.ts
-import { GoogleGenAI } from "@google/genai";
-const ai = new GoogleGenAI({ apiKey });
-const res = await ai.models.embedContent({
-  model: "gemini-embedding-001",
-  contents: texts,                        // native batching — drop the manual loop
-  config: { outputDimensionality: 768 },  // keeps your existing Qdrant collection valid
-});
-```
-
-⚠️ If you change dimensionality, you must recreate the `docsy_documents` collection and re-embed everything. `outputDimensionality: 768` avoids that. Also note `EMBEDDING_DIMENSION` is hardcoded — plan a migration path (versioned collection names, e.g. `docsy_documents_v2`).
-
-Also: `generateEmbeddings` batches 10 at a time but has **no retry and no backoff**. One 429 from Gemini fails the whole document. Add `p-retry` or a simple exponential backoff.
+- **The new vector space is a different space.** `lib/qdrant.ts` writes to `docsy_documents_v2` for that reason (and `convex/documents.ts` purges from the same name — the two constants must stay in step). **Every source indexed before this change has no vectors in the new collection**, so those notebooks retrieve nothing until they are re-uploaded. Delete the old collection from Qdrant once you accept that.
+- **Nothing has confirmed the pipeline actually returns vectors.** Upload a fresh document and check the point count in `docsy_documents_v2` directly — not the chat output, which has a fallback (§4.6) that hides an empty index.
 
 ### 5.3 🟠 Two overlapping UI primitive libraries
 
 `@base-ui/react` **and** `radix-ui` are both dependencies. Base UI is the successor project from the same team; `components.json` says `"style": "radix-lyra"`. You're shipping two component runtimes. Pick one and migrate `components/ui/*` (7 files — small). Same story for icons: **`lucide-react` + `@hugeicons/react` + `@hugeicons/core-free-icons`** are all installed; `components.json` sets `iconLibrary: hugeicons`. Pick one.
 
-### 5.6 🟠 The model catalogue is ~18 months stale
+### 5.6 🟡 Two hand-maintained lists remain in the catalogue
 
-`lib/openrouter.ts` is headed *"Updated: January 2026"*. Every entry is now old:
+The catalogue is fetched from `GET https://openrouter.ai/api/v1/models`, cached an hour by Next's data cache, filtered to free models plus an allowlist, and served to the picker through `/api/models`. `resolveModel()` validates every request against it server-side, so a retired slug or a caller-invented one becomes the default instead of a 400. For the record, when this landed **16 of the 19 hardcoded slugs no longer resolved** — including `DEFAULT_MODEL` and the model `/api/audio-overview` pinned, so both features were dead.
 
-| In your catalogue | Problem |
-|---|---|
-| `google/gemini-2.0-flash-exp:free` — **your `DEFAULT_MODEL`** | `-exp` preview slugs are routinely retired by OpenRouter. A dead default breaks chat for every user who never opens the model picker. |
-| `anthropic/claude-3.5-sonnet` | Two+ generations behind (Claude 5 family is current) |
-| `openai/gpt-4o-mini` | Superseded |
-| `meta-llama/llama-3.1-405b-instruct:free` | Free tier for 405B has been unreliable/removed |
-| `mistralai/devstral-2512:free`, `nvidia/nemotron-3-nano-30b-a3b:free` | **[verify]** — check these slugs still resolve |
+**What still rots, slowly:**
 
-Hardcoding a model catalogue guarantees this rots. **Fix it structurally:** fetch `GET https://openrouter.ai/api/v1/models` at build time or on an hourly ISR cache, filter to `:free` + a curated premium allowlist, and derive the picker from that. Keep a small hardcoded fallback list for when the fetch fails. Then a stale catalogue becomes impossible.
+- `PREMIUM_ALLOWLIST` and `FALLBACK_MODELS` in `lib/openrouter.ts` are hand-written. Dead entries in the allowlist vanish harmlessly (it is intersected with the live list), but new models never appear until someone adds them, and `FALLBACK_MODELS` — used only when the fetch fails — can go stale unnoticed. Verified live 2026-07-30.
+- `DEFAULT_MODEL` is one free slug. If OpenRouter retires it, chat falls back to a model that does not exist. Deriving the default from the live list (biggest-context free model) would close that.
+- The `Provider` union is hardcoded, so new vendors (poolside, inclusionai, cohere…) render under "Other" with a generic icon.
 
 (`/api/chat`'s direct OpenAI / Anthropic fallback branches are gone, along with the `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` vars they read — OpenRouter already fronts every provider.)
 
@@ -502,7 +484,7 @@ No empty states for a notebook with zero sources beyond the dropzone; no per-sou
 | **Dependabot / Renovate** | This report exists because nothing watched dependencies for 6 months. Automate it. |
 | **`SECURITY.md`** | Public repo (there's a GitHub link in the navbar) with no disclosure path. |
 
-Also: the README claims **"20+ top-tier AI models"** — the catalogue has 19, several of which are probably dead slugs (§5.6). And it doesn't mention Qdrant, Gemini embeddings, ElevenLabs, or Tavily/Serper at all, despite all four being required for the advertised features.
+Also: the README claims **"20+ top-tier AI models"** — true again now that the catalogue is live (§5.6), but it doesn't mention Qdrant, Gemini embeddings, ElevenLabs, or Tavily/Serper at all, despite all four being required for the advertised features.
 
 ---
 
@@ -565,7 +547,7 @@ Every item below has a **"Done when"** criterion. If you can't demonstrate the c
 
 | # | Task | § | Done when |
 |---|---|---|---|
-| 8 | **First: test whether embeddings still work at all.** Then migrate to `@google/genai` + `gemini-embedding-001` at `outputDimensionality: 768` | §5.1 | A fresh upload produces a non-zero Qdrant point count, and a question about that document returns a citation from it |
+| 8 | Confirm the new embedding pipeline writes vectors, and re-index pre-swap sources (the migration itself is done) | §5.1 | A fresh upload produces a non-zero point count in `docsy_documents_v2`, and a question about that document returns a citation from it |
 | 10b | Make the vector purge durable — retry a failed `purgeVectors` | §4.1 | Qdrant being down during a delete no longer orphans vectors permanently |
 | 11 | Make audio generation async via the status field (persistence is done) | §4.2 | The request returns immediately; the live query drives the UI from `pending` → `ready`. **Unblocks item 11b** |
 | 11b | Chunk the podcast script so the whole thing is narrated | §4.3 | A `"long"` overview's audio runs the full script, not the first 5,000 chars |
@@ -580,7 +562,6 @@ The remaining phases are lower-risk and less order-dependent, so they're listed 
 
 ### Phase 2 — Quality (weeks 4–6)
 14. Streaming chat via the AI SDK — **§8**
-16. Dynamic model catalogue from the OpenRouter API — **§5.6**
 17. Split `sources-panel.tsx` — **§6.2**
 19. Extend `bun test` coverage + Playwright (CI itself is done) — **§10**
 20. Sentry + Helicone/Langfuse — **§10**
@@ -597,12 +578,9 @@ The remaining phases are lower-risk and less order-dependent, so they're listed 
 
 ## 13. Quick reference: dependency actions
 
-All dependencies are on latest as of 2026-07-27 except the three in §5.7, which are blocked. `@google/generative-ai` is *also* at its latest published version — the fix there is a package swap, not an update.
+All dependencies are on latest as of 2026-07-27 except the three in §5.7, which are blocked. `@google/generative-ai` has been replaced by `@google/genai` (§5.1).
 
 ```bash
-# Replace — deprecated (not solved by updating; 0.24.1 is latest)
-bun remove @google/generative-ai && bun add @google/genai
-
 # Add — infrastructure
 bun add ai @ai-sdk/openai-compatible        # streaming
 bun add @t3-oss/env-nextjs zod              # env validation

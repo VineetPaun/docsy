@@ -2,11 +2,11 @@
 
 import * as React from "react";
 import {
-  OPENROUTER_MODELS,
-  DEFAULT_MODEL,
+  FALLBACK_MODELS,
   PROVIDERS,
   getModelsByProvider,
   type ModelId,
+  type ModelInfo,
   type Provider,
 } from "@/lib/openrouter";
 
@@ -143,9 +143,34 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
   const [searchQuery, setSearchQuery] = React.useState("");
   const dropdownRef = React.useRef<HTMLDivElement>(null);
 
+  // The catalogue is fetched, not imported — it comes from OpenRouter now, so a
+  // retired model disappears on its own (AUDIT.md §5.6). `FALLBACK_MODELS`
+  // renders immediately and is replaced when the request lands.
+  const [models, setModels] = React.useState<ModelInfo[]>(FALLBACK_MODELS);
+
+  React.useEffect(() => {
+    let active = true;
+
+    fetch("/api/models")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (active && data?.models?.length) setModels(data.models);
+      })
+      .catch(() => {
+        // The fallback list is already on screen; nothing to recover.
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const selectedModel =
-    OPENROUTER_MODELS[value] || OPENROUTER_MODELS[DEFAULT_MODEL];
-  const modelsByProvider = React.useMemo(() => getModelsByProvider(), []);
+    models.find((model) => model.id === value) ?? models[0];
+  const modelsByProvider = React.useMemo(
+    () => getModelsByProvider(models),
+    [models]
+  );
 
   // Get providers that have models
   const availableProviders = React.useMemo(() => {
@@ -156,21 +181,19 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
 
   // Filter models based on selected provider and search
   const filteredModels = React.useMemo(() => {
-    let models = selectedProvider
-      ? modelsByProvider[selectedProvider]
-      : Object.values(OPENROUTER_MODELS);
+    let visible = selectedProvider ? modelsByProvider[selectedProvider] : models;
 
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
-      models = models.filter(
+      visible = visible.filter(
         (m) =>
           m.name.toLowerCase().includes(query) ||
           m.description.toLowerCase().includes(query),
       );
     }
 
-    return models;
-  }, [selectedProvider, searchQuery, modelsByProvider]);
+    return visible;
+  }, [selectedProvider, searchQuery, modelsByProvider, models]);
 
   // Close dropdown when clicking outside
   React.useEffect(() => {
@@ -308,7 +331,7 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
                 <button
                   key={model.id}
                   onClick={() => {
-                    onChange(model.id as ModelId);
+                    onChange(model.id);
                     setIsOpen(false);
                   }}
                   className={`flex w-full items-center gap-3 rounded-md px-2 py-2 text-left text-sm transition-colors hover:bg-muted ${

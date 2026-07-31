@@ -6,7 +6,7 @@ import { api } from "@/convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { ModelSelector } from "@/components/model-selector";
 import { CitationTooltip } from "@/components/citation-tooltip";
-import { DEFAULT_MODEL, isValidModel, type ModelId } from "@/lib/openrouter";
+import { DEFAULT_MODEL, type ModelId } from "@/lib/openrouter";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -91,16 +91,12 @@ export function NotebookChat({
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
   const inputRef = React.useRef<HTMLTextAreaElement>(null);
 
-  // Load saved model preference
+  // Load saved model preference. No client-side validity check any more — the
+  // catalogue is fetched, not imported, and `/api/chat` resolves an unknown or
+  // retired id to the default anyway (AUDIT.md §5.6).
   React.useEffect(() => {
     const savedModel = localStorage.getItem("docsy-model");
-    if (savedModel && isValidModel(savedModel)) {
-      setSelectedModel(savedModel);
-    } else if (savedModel) {
-      // Clear invalid saved model
-      localStorage.removeItem("docsy-model");
-      setSelectedModel(DEFAULT_MODEL);
-    }
+    if (savedModel) setSelectedModel(savedModel);
   }, []);
 
   // Save model preference

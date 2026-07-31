@@ -16,6 +16,8 @@ Execution plan for tomorrow. Ordered; later tasks assume earlier ones landed.
 
 **Added later on 2026-07-30:** `/api/audio-overview` checks notebook ownership and reads its sources from Convex (the last route trusting body text); **demo mode deleted** — chat, web search and research return 503 naming the missing key instead of fake output; the podcast prompt is single-narrator, since one voice reads it; canvas args gone from `updateNotebook`; **a11y pass** — accessible names on every icon-only control, keyboard path for the landing dropzone, keyboard seeking on the audio scrubber, focus-openable citation tooltip, `role="status"` spinners, global `prefers-reduced-motion`. `bun run lint` clean, `bun test` 11/11.
 
+**Added 2026-07-30, third batch:** **embeddings migrated** to `@google/genai` + `gemini-embedding-001` (768 dims, task types, retry on 429) and the Qdrant collection bumped to `docsy_documents_v2`; **the model catalogue is live** — 16 of the 19 hardcoded slugs were dead, including `DEFAULT_MODEL` and the one `/api/audio-overview` used, so chat *and* audio were broken. `lib/openrouter.ts` now fetches from OpenRouter hourly, `/api/models` feeds the picker, and `resolveModel()` validates server-side. `tsc` clean, `lint` clean, `bun test` 19/19.
+
 **Phase 0 code is now complete apart from the storage quota (§3.5).** Everything written since 2026-07-27 is unproven.
 
 ⚠️ **The config surface grew.** Four env vars on the *Convex deployment* and a registered webhook, each with a different silent failure — AUDIT.md §3.1 has the symptom table. Two are new today:
@@ -28,8 +30,6 @@ Background and rationale for every item: [AUDIT.md](AUDIT.md). This file is the 
 
 ## Pre-flight — now the critical path 🔴
 
-- [ ] `git checkout -b fix/convex-auth` — the uncommitted diff touches 30+ files, don't land it on `main`
-- [ ] **Commit the work so far**, so the auth change is reviewable on its own
 - [ ] `cp .env.example .env.local` and fill it in — **`bun run build` cannot finish without `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`**, and none of the acceptance tests below can run without a working env
 - [ ] In the Clerk Dashboard, create the **`convex` JWT template** if it does not exist. `convex/auth.config.ts` pins `applicationID: "convex"`, which must match the token's `aud` claim — a differently-named template reads as anonymous. `lib/convex-server.ts` needs the same template, and fails closed without it (403 on search/embed/chat)
 - [ ] **Set all four vars on the Convex deployment**, not in `.env.local` — Convex functions read their own env:
@@ -66,8 +66,8 @@ The code for this is written. **Pre-flight is what turns it on** — a missing C
 
 ## If there is time left
 
-- [ ] **Test whether embeddings still work at all** (AUDIT.md §5.1). `text-embedding-004` was scheduled for shutdown ~January 2026 and it is now July. Upload a fresh document and check Qdrant's point count is non-zero. **If it is zero, RAG has been silently dead for months** and every "answer" has come from the full-document fallback. This is a 5-minute check with a large blast radius — arguably do it during pre-flight.
-      ⚠️ Retrieval now applies a 0.5 cosine score floor, so "no citations" no longer distinguishes *dead pipeline* from *nothing relevant*. Check Qdrant's point count directly, not the chat output
+- [ ] **Confirm the new embedding pipeline writes vectors** (AUDIT.md §5.1). `lib/embeddings.ts` is on `@google/genai` + `gemini-embedding-001` now, and it has never run. Upload a fresh document and check the point count in **`docsy_documents_v2`** is non-zero.
+      ⚠️ Two traps: the collection is versioned, so **anything indexed before today retrieves nothing until it is re-uploaded**; and the 0.5 score floor plus the full-document fallback (§4.6) mean "no citations" cannot tell you a dead pipeline from nothing relevant. Check Qdrant directly, not the chat output
 
 ---
 
@@ -80,8 +80,6 @@ The code for this is written. **Pre-flight is what turns it on** — a missing C
 - Reasonable call: stay on v6 for now. v6 is supported, and the migration buys no feature you currently need
 
 **2. `eslint` 10 and `typescript` 7** — blocked upstream, nothing to decide. `eslint-config-next@16.2.12` depends on `typescript-eslint@8`, which peer-caps `eslint ^9` and `typescript <6`. Both fail the lint run today. Recheck with `bun outdated` when Next ships a config on `typescript-eslint@9`; they will likely clear together.
-
-**3. `@google/generative-ai`** — `0.24.1` *is* the latest published version. Updating cannot fix it; only the swap to `@google/genai` + `gemini-embedding-001` at `outputDimensionality: 768` will (AUDIT.md §5.1). Tied to the embeddings test above.
 
 ---
 

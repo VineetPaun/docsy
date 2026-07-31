@@ -2,7 +2,8 @@ import { v } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
 import { getUser, requireUser } from "./lib/auth";
 import { purgeNotebook } from "./lib/cascade";
-import { decideRateLimit } from "./lib/rate-limit-window";
+// camelCase filename is required: Convex rejects module paths containing hyphens.
+import { decideRateLimit } from "./lib/rateLimitWindow";
 
 /**
  * Per-user budgets for the routes that spend money, in requests per window.

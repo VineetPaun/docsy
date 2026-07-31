@@ -11,7 +11,7 @@
   "dependencies": {
     "@base-ui/react": "^1.6.0",
     "@clerk/nextjs": "^6.39.6",
-    "@google/generative-ai": "^0.24.1",
+    "@google/genai": "^2.14.0",
     "@hugeicons/core-free-icons": "^4.2.3",
     "@hugeicons/react": "^1.1.9",
     "@qdrant/js-client-rest": "^1.18.0",

@@ -1,7 +1,17 @@
 import { QdrantClient } from "@qdrant/js-client-rest";
 import { EMBEDDING_DIMENSION } from "./embeddings";
 
-const COLLECTION_NAME = "docsy_documents";
+/**
+ * Versioned because the embedding model changed (AUDIT.md §5.1). `_v2` holds
+ * `gemini-embedding-001` vectors; anything written by `text-embedding-004` is
+ * in the unversioned collection and is not comparable to a query embedded
+ * today. Bump this whenever the model or dimensionality changes — old points
+ * left in place score plausibly and answer wrongly.
+ *
+ * Sources indexed before this change need re-uploading; the old collection can
+ * be deleted from Qdrant by hand once nothing needs it.
+ */
+const COLLECTION_NAME = "docsy_documents_v2";
 
 let qdrantClient: QdrantClient | null = null;
 

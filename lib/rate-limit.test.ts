@@ -8,7 +8,7 @@
  */
 
 import { expect, test } from "bun:test";
-import { decideRateLimit } from "../convex/lib/rate-limit-window";
+import { decideRateLimit } from "../convex/lib/rateLimitWindow";
 
 const MINUTE = 60_000;
 const WINDOW = 60 * MINUTE;

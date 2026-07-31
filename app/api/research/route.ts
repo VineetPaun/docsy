@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { chatWithOpenRouter, DEFAULT_MODEL, type ModelId } from "@/lib/openrouter";
+import { chatWithOpenRouter, resolveModel, type ModelId } from "@/lib/openrouter";
 import { requireApiAuth } from "@/lib/api-auth";
 import { enforceRateLimit } from "@/lib/rate-limit";
 
@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body: ResearchRequest = await request.json();
-    const { topic, depth = "standard", model = DEFAULT_MODEL } = body;
+    const { topic, depth = "standard", model } = body;
 
     if (!topic) {
       return NextResponse.json(
@@ -55,7 +55,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Step 1: Generate search queries based on the topic
-    const searchQueries = await generateSearchQueries(topic, depth, model as ModelId);
+    // One resolve for both calls — see lib/openrouter.ts.
+    const selectedModel = await resolveModel(model);
+
+    const searchQueries = await generateSearchQueries(topic, depth, selectedModel);
 
     // Step 2: Perform web searches
     const allSources: ResearchSource[] = [];
@@ -101,7 +104,12 @@ export async function POST(request: NextRequest) {
     }
 
     // Step 3: Synthesize the research report
-    const report = await synthesizeReport(topic, allSources, depth, model as ModelId);
+    const report = await synthesizeReport(
+      topic,
+      allSources,
+      depth,
+      selectedModel
+    );
 
     return NextResponse.json({
       success: true,

@@ -85,6 +85,7 @@ The code for this is written and the configuration is in place. **The smoke test
 - [ ] **Confirm the new embedding pipeline writes vectors** (AUDIT.md §5.1). `lib/embeddings.ts` is on `@google/genai` + `gemini-embedding-001` now, and it has never run. Upload a fresh document and check the point count in **`docsy_documents_v2`** is non-zero.
       ⚠️ Two traps: the collection is versioned, so **anything indexed before today retrieves nothing until it is re-uploaded**; and with the fallback deleted, a dead pipeline answers "not in your sources" to everything — a symptom that looks the same as an irrelevant question. Check Qdrant directly, not the chat output
 
+- [ ] **Look at the source preview once** — it is a Radix dialog now (§9.4): open it from a citation, tab through it (focus must stay inside and return to the chip on close), press Escape, and check the highlighted passage still scrolls into view. Also check the header on a 375px viewport
 - [ ] **Verify the 2026-08-10 batch:**
       - ask a question a source clearly answers → citations render. Ask one nothing covers → "not in your sources", no invented answer
       - unset `QDRANT_URL` locally and send a message → 503 naming it as a retryable inline alert, not a silent ungrounded reply

@@ -1,6 +1,18 @@
 "use client";
 
 import * as React from "react";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Cancel01Icon } from "@hugeicons/core-free-icons";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 interface Document {
   _id: string;
@@ -28,9 +40,7 @@ export function DocumentPreview({
   onClose,
   highlightRange,
 }: DocumentPreviewProps) {
-  const modalRef = React.useRef<HTMLDivElement>(null);
   const highlightRef = React.useRef<HTMLElement>(null);
-  const contentRef = React.useRef<HTMLDivElement>(null);
 
   // Scroll to highlight when it changes
   React.useEffect(() => {
@@ -44,22 +54,6 @@ export function DocumentPreview({
       }, 100);
     }
   }, [highlightRange, document]);
-
-  // Close on escape key
-  React.useEffect(() => {
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    if (document) {
-      window.addEventListener("keydown", handleEscape);
-    }
-    return () => window.removeEventListener("keydown", handleEscape);
-  }, [document, onClose]);
-
-  // Close on click outside
-  const handleBackdropClick = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) onClose();
-  };
 
   if (!document) return null;
 
@@ -101,77 +95,64 @@ export function DocumentPreview({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-2 backdrop-blur-sm sm:p-4 bg-black/50"
-      onClick={handleBackdropClick}
+    // Radix owns the modal semantics now: focus is trapped while it is open and
+    // restored to whatever opened it, and Escape and the backdrop close it
+    // without handlers of our own (AUDIT.md §9.4).
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
     >
-      {/*
-        Hand-rolled dialog semantics. Focus is not trapped here — that comes
-        with the move to shadcn's `Dialog`, which also deletes the escape and
-        backdrop handlers above (AUDIT.md §9.4).
-      */}
-      <div
-        ref={modalRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="document-preview-title"
-        className="relative flex h-[92dvh] w-full max-w-4xl flex-col rounded-xl border border-border bg-background shadow-2xl sm:h-[85dvh] sm:w-[90vw]"
+      <DialogContent
+        showCloseButton={false}
+        className="flex h-[92dvh] max-w-[calc(100%-1rem)] flex-col gap-0 rounded-xl p-0 text-sm sm:h-[85dvh] sm:max-w-4xl"
       >
         {/* Header */}
-        <div className="flex items-center justify-between gap-2 border-b border-border/40 px-4 py-3 sm:px-6 sm:py-4">
+        <DialogHeader className="flex-row items-center justify-between gap-2 border-b border-border/40 px-4 py-3 sm:px-6 sm:py-4">
           <div className="flex min-w-0 items-center gap-3">
             {getFileIcon(document.type)}
             <div className="min-w-0">
-              <h2
-                id="document-preview-title"
-                className="truncate font-semibold"
-              >
+              <DialogTitle className="truncate text-base font-semibold">
                 {document.name}
-              </h2>
-              <p className="text-xs text-muted-foreground">
+              </DialogTitle>
+              <DialogDescription className="text-xs">
                 Added {formatDate(document.createdAt)}
                 {highlightRange?.pageNumber && (
                   <span className="ml-2 text-primary">
                     • Viewing Page {highlightRange.pageNumber}
                   </span>
                 )}
-              </p>
+              </DialogDescription>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             {highlightRange && (
-              <span className="rounded-full bg-yellow-100 dark:bg-yellow-900/30 px-2.5 py-0.5 text-xs font-medium text-yellow-700 dark:text-yellow-300">
+              <span className="hidden rounded-full bg-yellow-100 dark:bg-yellow-900/30 px-2.5 py-0.5 text-xs font-medium text-yellow-700 dark:text-yellow-300 sm:inline">
                 Source highlighted
               </span>
             )}
             <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium uppercase">
               {document.type}
             </span>
-            <button
-              onClick={onClose}
-              aria-label="Close the preview"
-              className="rounded-lg p-2 hover:bg-muted transition-colors"
-            >
-              <svg
-                aria-hidden="true"
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="size-5"
+            <DialogClose asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Close the preview"
               >
-                <path d="M18 6 6 18" />
-                <path d="m6 6 12 12" />
-              </svg>
-            </button>
+                <HugeiconsIcon
+                  icon={Cancel01Icon}
+                  strokeWidth={2}
+                  className="size-5"
+                />
+              </Button>
+            </DialogClose>
           </div>
-        </div>
+        </DialogHeader>
 
         {/* Content */}
-        <div ref={contentRef} className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
           {document.content ? (
             <div className="prose prose-sm dark:prose-invert max-w-none">
               <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
@@ -228,20 +209,17 @@ export function DocumentPreview({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between border-t border-border/40 px-6 py-3">
+        <DialogFooter className="flex-row items-center justify-between border-t border-border/40 px-4 py-3 sm:px-6">
           <p className="text-xs text-muted-foreground">
             {document.content
               ? `${document.content.length.toLocaleString()} characters`
               : "No content"}
           </p>
-          <button
-            onClick={onClose}
-            className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-          >
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
+          <DialogClose asChild>
+            <Button>Close</Button>
+          </DialogClose>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

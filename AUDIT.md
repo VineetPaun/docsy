@@ -59,6 +59,7 @@ Bare record of what has been removed, so nobody re-audits it as a fresh finding.
 | 2026-08-03 | §4.1 — a failed vector purge was never retried | `convex/documents.ts` `purgeVectors` reschedules itself on failure (`PURGE_RETRY_DELAYS_S` — 1min/5min/25min/2h) and gives up with a named log line. Safe only because it is an action; the same code in a mutation would roll the schedule back. **`QDRANT_URL` residual stays as §4.1** |
 | 2026-08-03 | §4.6 — the full-document fallback answered without citations | `/api/chat` — retrieval is the only path from a source to the prompt now. `MAX_FALLBACK_CONTEXT_CHARS` and the raw-text loop are gone; a missing `GOOGLE_API_KEY` / `QDRANT_URL` is a **503 naming it** and a retrieval throw is a 502 ("Could not search your sources"), instead of a silent downgrade to an ungrounded answer. Empty results now say so in the prompt. `notebookId` is required (it was optional, which only produced context-free completions) and the dead `useRAG` flag — no caller ever set it — is deleted. ⚠️ Chat is now unusable without a working Qdrant + embeddings pair; that is the point, but it means §5.1 is no longer optional |
 | 2026-08-03 | ROADMAP §3.4 — uploaded source text was pasted into the system prompt as instructions | `lib/prompt-guard.ts` — `fenceSourceData()` wraps untrusted text in `<source_data>` (stripping the delimiters from the content so a document cannot close the block) and `SOURCE_DATA_RULE` tells the model the block is data, never commands. Applied in `/api/chat`, `/api/audio-overview` and `/api/research` (search snippets are untrusted too). Covered by `lib/prompt-guard.test.ts`. **Structural separation only** — mitigations 2–5 stay open in ROADMAP §3.4 |
+| 2026-08-10 | §9.4 — `document-preview.tsx` trapped no focus | Rebuilt on `components/ui/dialog.tsx` (Radix): focus is trapped and restored, Escape and backdrop dismissal come free, and the hand-rolled `keydown` listener, backdrop handler, `role="dialog"` / `aria-modal` attributes and two inline SVGs are deleted. **An `axe` / screen-reader pass is still owed — that residual stays as §9.4** |
 | 2026-08-10 | §5.3 — two overlapping UI primitive libraries and two icon sets | `@base-ui/react` had zero imports repo-wide; `lucide-react` had one file (`audio-player.tsx`, swapped to the `@hugeicons` set `components.json` already declares). Both uninstalled — one component runtime, one icon library |
 | 2026-08-10 | §5.6 — `DEFAULT_MODEL` was a hardcoded slug | `pickDefaultModel()` derives the default from the live catalogue: biggest-context **free** model, so a retirement moves it instead of breaking chat. The constant survives as the last resort behind a failed fetch. `model-selector.tsx` adopts the id it displays when the stored one is not on offer — the label used to name one model while the request carried a dead slug. Covered by `lib/openrouter.test.ts` |
 | 2026-08-10 | §7 — an invented `[7]` rendered as a citation chip | `notebook-chat.tsx` `renderWithCitations()` — a reference with no matching citation renders as the literal text the model wrote, not as a badge that looks checked and opens nothing |
@@ -180,7 +181,7 @@ The problem is that it was built fast and never hardened. At the time of the aud
 | Code quality | **B−** | 1200-line god component remains; `console.*` and `any` now effectively zero |
 | Testing / CI | **D+** | 8 unit test files + CI on push/PR; no integration or E2E coverage |
 | Performance / cost | **C** | Rate limits, bounded payloads, streamed answers and optimistic sends; no caching, and `.collect()` + JS sort is still everywhere (§8) |
-| Mobile / a11y | **C** | Notebook page is responsive now; dashboard is not. Accessible names, keyboard paths and reduced-motion are in; focus management and any real audit are not (§9.4) |
+| Mobile / a11y | **C+** | Notebook page is responsive now; dashboard is not. Accessible names, keyboard paths, reduced-motion and dialog focus management are in; any real audit is not (§9.4) |
 
 ### The 3 things to do this week
 
@@ -429,20 +430,19 @@ The notebook page is responsive: shadcn `Tabs` switch between sources and chat b
 
 **Not verified in a browser** — this was built by reading, not by looking. Check the tab switch, the composer with the keyboard open, and the model dropdown on a real phone.
 
-**Still open:** `app/dashboard/page.tsx` (408 lines) has not been through the same pass, and `document-preview.tsx` reflows but its long text column is untuned for a narrow screen.
+**Still open:** `app/dashboard/page.tsx` (408 lines) has not been through the same pass. `document-preview.tsx` is a Radix dialog now and tightens its padding below `sm`, but its long text column has not been read on a phone.
 
 ### 9.3 🟠 No resizable panels
 
 The 40/60 split is fixed with a hard `max-w-[480px]`. Users reading a document alongside chat will want to drag. `react-resizable-panels` + persist to `localStorage`.
 
-### 9.4 🟠 Accessibility: names and keyboard paths are in, focus management is not
+### 9.4 🟡 Accessibility: written by reading, never observed
 
-Every icon-only control has an accessible name, both dropzones have a keyboard path, spinners announce, the audio scrubber and the citation tooltip work without a mouse, and `prefers-reduced-motion` is honoured globally (`app/globals.css`, with `.animate-spin` deliberately exempt).
+Every icon-only control has an accessible name, both dropzones have a keyboard path, spinners announce, the audio scrubber and the citation tooltip work without a mouse, `prefers-reduced-motion` is honoured globally (`app/globals.css`, with `.animate-spin` deliberately exempt), and every modal is a Radix dialog, so focus is trapped and restored.
 
 **What remains:**
 
-- **`document-preview.tsx` traps nothing.** It is a hand-rolled overlay with `role="dialog"` / `aria-modal` and its own Escape and backdrop handlers; focus stays behind it and is not restored on close. Replacing it with `components/ui/dialog.tsx` fixes that *and* deletes both handlers — the right fix, and larger than a label.
-- **Nothing has been run through `axe`**, and none of this was checked with a screen reader or by tabbing the app in a browser. The fixes were written by reading.
+- **Nothing has been run through `axe`**, and none of this was checked with a screen reader or by tabbing the app in a browser. The fixes were written by reading. Focus management now comes from Radix in every dialog, which is worth more than the previous hand-rolled overlays, but it has still never been observed working.
 
 ### 9.6 🟡 Missing basics
 

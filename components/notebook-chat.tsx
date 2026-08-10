@@ -428,7 +428,13 @@ export function NotebookChat({
       const citationNum = parseInt(match[1], 10);
       const citation = citations.find((c) => c.id === citationNum);
 
-      if (citation && onCitationClick) {
+      if (!citation) {
+        // Nothing to open. A model asked for 5 sources will still write [7]
+        // occasionally, and rendering that as a chip made an invented reference
+        // look exactly like a checked one (AUDIT.md §7). Leave it as the text
+        // the model wrote — visible, unclickable, not dressed up as evidence.
+        parts.push(match[0]);
+      } else if (onCitationClick) {
         parts.push(
           <CitationTooltip
             key={`citation-${match.index}`}

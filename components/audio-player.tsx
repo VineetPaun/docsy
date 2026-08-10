@@ -1,17 +1,18 @@
 "use client";
 
 import React, { useRef, useState, useEffect, useCallback } from "react";
+import { HugeiconsIcon } from "@hugeicons/react";
 import {
-  Play,
-  Pause,
-  RotateCcw,
-  Volume2,
-  VolumeX,
-  ChevronDown,
-  ChevronUp,
-  Download,
-  RefreshCw,
-} from "lucide-react";
+  ArrowDown01Icon,
+  ArrowUp01Icon,
+  DownloadIcon,
+  PauseIcon,
+  PlayIcon,
+  Refresh01Icon,
+  RotateLeft02Icon,
+  VolumeHighIcon,
+  VolumeOffIcon,
+} from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
 
 interface AudioPlayerProps {
@@ -235,7 +236,7 @@ export default function AudioPlayer({
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-blue-500 rounded-lg flex items-center justify-center">
-            <Volume2 className="w-5 h-5 text-white" />
+            <HugeiconsIcon icon={VolumeHighIcon} strokeWidth={2} className="w-5 h-5 text-white" />
           </div>
           <div>
             <h3 className="font-semibold text-sm">{title}</h3>
@@ -258,7 +259,9 @@ export default function AudioPlayer({
               disabled={isGenerating}
               className="text-xs"
             >
-              <RefreshCw
+              <HugeiconsIcon
+                icon={Refresh01Icon}
+                strokeWidth={2}
                 className={`w-4 h-4 mr-1 ${isGenerating ? "animate-spin" : ""}`}
               />
               Regenerate
@@ -273,7 +276,7 @@ export default function AudioPlayer({
               disabled={!audioSource}
               className="h-8 w-8"
             >
-              <Download className="w-4 h-4" />
+              <HugeiconsIcon icon={DownloadIcon} strokeWidth={2} className="w-4 h-4" />
             </Button>
           )}
         </div>
@@ -324,7 +327,7 @@ export default function AudioPlayer({
               className="h-8 w-8"
               disabled={!audioSource}
             >
-              <RotateCcw className="w-4 h-4" />
+              <HugeiconsIcon icon={RotateLeft02Icon} strokeWidth={2} className="w-4 h-4" />
             </Button>
 
             {/* Play/Pause */}
@@ -337,9 +340,9 @@ export default function AudioPlayer({
               disabled={!audioSource || isGenerating}
             >
               {isPlaying ? (
-                <Pause className="w-5 h-5 text-white" />
+                <HugeiconsIcon icon={PauseIcon} strokeWidth={2} className="w-5 h-5 text-white" />
               ) : (
-                <Play className="w-5 h-5 text-white ml-0.5" />
+                <HugeiconsIcon icon={PlayIcon} strokeWidth={2} className="w-5 h-5 text-white ml-0.5" />
               )}
             </Button>
 
@@ -353,9 +356,9 @@ export default function AudioPlayer({
               disabled={!audioSource}
             >
               {isMuted ? (
-                <VolumeX className="w-4 h-4" />
+                <HugeiconsIcon icon={VolumeOffIcon} strokeWidth={2} className="w-4 h-4" />
               ) : (
-                <Volume2 className="w-4 h-4" />
+                <HugeiconsIcon icon={VolumeHighIcon} strokeWidth={2} className="w-4 h-4" />
               )}
             </Button>
           </div>
@@ -383,9 +386,9 @@ export default function AudioPlayer({
               >
                 Transcript
                 {showTranscript ? (
-                  <ChevronUp className="w-3 h-3 ml-1" />
+                  <HugeiconsIcon icon={ArrowUp01Icon} strokeWidth={2} className="w-3 h-3 ml-1" />
                 ) : (
-                  <ChevronDown className="w-3 h-3 ml-1" />
+                  <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={2} className="w-3 h-3 ml-1" />
                 )}
               </Button>
             )}
@@ -404,9 +407,9 @@ export default function AudioPlayer({
           >
             {showTranscript ? "Hide" : "View"} Script
             {showTranscript ? (
-              <ChevronUp className="w-3 h-3 ml-1" />
+              <HugeiconsIcon icon={ArrowUp01Icon} strokeWidth={2} className="w-3 h-3 ml-1" />
             ) : (
-              <ChevronDown className="w-3 h-3 ml-1" />
+              <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={2} className="w-3 h-3 ml-1" />
             )}
           </Button>
         </div>
@@ -448,7 +451,9 @@ export default function AudioPlayer({
       {/* Generating state */}
       {isGenerating && (
         <div className="mt-4 p-4 bg-secondary/50 rounded-lg text-center">
-          <RefreshCw
+          <HugeiconsIcon
+            icon={Refresh01Icon}
+            strokeWidth={2}
             role="status"
             aria-label="Generating your audio overview"
             className="w-6 h-6 animate-spin mx-auto mb-2 text-purple-400"

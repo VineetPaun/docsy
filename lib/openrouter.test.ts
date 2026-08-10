@@ -5,7 +5,13 @@
  */
 
 import { expect, test } from "bun:test";
-import { isOfferedModel, parseStreamLine, toModelInfo } from "./openrouter";
+import {
+  DEFAULT_MODEL,
+  isOfferedModel,
+  parseStreamLine,
+  pickDefaultModel,
+  toModelInfo,
+} from "./openrouter";
 
 const freeModel = {
   id: "google/gemma-4-31b-it:free",
@@ -113,4 +119,24 @@ test("survives malformed JSON instead of throwing", () => {
 test("keeps whitespace-only deltas, which carry real spacing", () => {
   const line = `data: ${JSON.stringify({ choices: [{ delta: { content: " " } }] })}`;
   expect(parseStreamLine(line)).toBe(" ");
+});
+
+test("default model is the biggest-context free one", () => {
+  const catalogue = [
+    toModelInfo(paidAllowlisted),
+    toModelInfo({ ...freeModel, id: "small/free:free", context_length: 8000 }),
+    toModelInfo(freeModel),
+  ];
+
+  // Not the paid 128K one, and not the small free one.
+  expect(pickDefaultModel(catalogue)).toBe("google/gemma-4-31b-it:free");
+});
+
+test("default model never falls to a paid model unless nothing is free", () => {
+  expect(pickDefaultModel([toModelInfo(paidAllowlisted)])).toBe(
+    "openai/gpt-4o-mini"
+  );
+  // An empty catalogue is the fetch having failed; the hardcoded slug is the
+  // last resort, not the usual path.
+  expect(pickDefaultModel([])).toBe(DEFAULT_MODEL);
 });

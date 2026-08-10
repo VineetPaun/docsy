@@ -144,7 +144,7 @@ lib/
 - **Client/server:** 28 of 38 components are `"use client"`. Landing sections, `components/ui/` primitives, and `app/layout.tsx` are server components. Pages under `dashboard/` and `notebook/` are client components that gate on `useUser()` — a pattern worth converting, not extending.
 - **Imports:** `@/*` path alias.
 - **Toasts:** `sonner` (`toast.success` / `.error`). Don't add another toast library.
-- **Icons:** `components.json` sets `hugeicons`, but `lucide-react` is also installed and used. Prefer hugeicons for new work; don't add a third.
+- **Icons:** `@hugeicons/react` + `@hugeicons/core-free-icons` only — `<HugeiconsIcon icon={PlayIcon} strokeWidth={2} className="w-4 h-4" />`. `lucide-react` and `@base-ui/react` were uninstalled on 2026-08-10; don't reintroduce either.
 - **Convex access:** `useQuery` / `useMutation` from `convex/react`, with `"skip"` when args aren't ready.
 
 ## Before you claim something works

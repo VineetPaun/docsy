@@ -59,6 +59,9 @@ Bare record of what has been removed, so nobody re-audits it as a fresh finding.
 | 2026-08-03 | §4.1 — a failed vector purge was never retried | `convex/documents.ts` `purgeVectors` reschedules itself on failure (`PURGE_RETRY_DELAYS_S` — 1min/5min/25min/2h) and gives up with a named log line. Safe only because it is an action; the same code in a mutation would roll the schedule back. **`QDRANT_URL` residual stays as §4.1** |
 | 2026-08-03 | §4.6 — the full-document fallback answered without citations | `/api/chat` — retrieval is the only path from a source to the prompt now. `MAX_FALLBACK_CONTEXT_CHARS` and the raw-text loop are gone; a missing `GOOGLE_API_KEY` / `QDRANT_URL` is a **503 naming it** and a retrieval throw is a 502 ("Could not search your sources"), instead of a silent downgrade to an ungrounded answer. Empty results now say so in the prompt. `notebookId` is required (it was optional, which only produced context-free completions) and the dead `useRAG` flag — no caller ever set it — is deleted. ⚠️ Chat is now unusable without a working Qdrant + embeddings pair; that is the point, but it means §5.1 is no longer optional |
 | 2026-08-03 | ROADMAP §3.4 — uploaded source text was pasted into the system prompt as instructions | `lib/prompt-guard.ts` — `fenceSourceData()` wraps untrusted text in `<source_data>` (stripping the delimiters from the content so a document cannot close the block) and `SOURCE_DATA_RULE` tells the model the block is data, never commands. Applied in `/api/chat`, `/api/audio-overview` and `/api/research` (search snippets are untrusted too). Covered by `lib/prompt-guard.test.ts`. **Structural separation only** — mitigations 2–5 stay open in ROADMAP §3.4 |
+| 2026-08-10 | §5.3 — two overlapping UI primitive libraries and two icon sets | `@base-ui/react` had zero imports repo-wide; `lucide-react` had one file (`audio-player.tsx`, swapped to the `@hugeicons` set `components.json` already declares). Both uninstalled — one component runtime, one icon library |
+| 2026-08-10 | §5.6 — `DEFAULT_MODEL` was a hardcoded slug | `pickDefaultModel()` derives the default from the live catalogue: biggest-context **free** model, so a retirement moves it instead of breaking chat. The constant survives as the last resort behind a failed fetch. `model-selector.tsx` adopts the id it displays when the stored one is not on offer — the label used to name one model while the request carried a dead slug. Covered by `lib/openrouter.test.ts` |
+| 2026-08-10 | §7 — an invented `[7]` rendered as a citation chip | `notebook-chat.tsx` `renderWithCitations()` — a reference with no matching citation renders as the literal text the model wrote, not as a badge that looks checked and opens nothing |
 | 2026-08-03 | §10 — `.env.example` did not actually exist | The 2026-07-29 row below was wrong: the file was never written, and `git ls-files` had no trace of it. Now present with all 14 client-side vars, the four Convex-deployment ones, and the silent-failure table |
 | 2026-07-29 | §4.5 — source selection never reached retrieval · §4.7 — full document text posted per chat message | `/api/chat` takes `documentIds` instead of `documents` and loads the text itself via `notebookDocuments()` (`lib/convex-server.ts`); the selection filters both retrieval (`searchChunks({ documentIds })`) and the no-RAG fallback; `selectedDocs` lifted from `sources-panel.tsx` to `app/notebook/[id]/page.tsx` so chat can read it. Empty selection = whole notebook. **`/api/audio-overview` still takes body text — that residual is now §4.7** |
 
@@ -172,7 +175,7 @@ The problem is that it was built fast and never hardened. At the time of the aud
 | Feature breadth | **A−** | Ambitious and mostly delivered |
 | Security | **B−** | IDOR closed, routes check ownership, rate limits in place; unproven at runtime, no storage quota |
 | Data integrity | **B−** | Deletes cascade and retry; audio persists and is narrated in full. Unproven at runtime |
-| Dependency health | **B** | Deprecated Google SDK replaced; 3 packages pinned back on upstream blockers (§5.7) |
+| Dependency health | **B+** | Deprecated Google SDK replaced, duplicate UI and icon libraries removed; 3 packages pinned back on upstream blockers (§5.7) |
 | RAG quality | **C** | Works, but naive — no reranking, no hybrid, top-5 fixed |
 | Code quality | **B−** | 1200-line god component remains; `console.*` and `any` now effectively zero |
 | Testing / CI | **D+** | 8 unit test files + CI on push/PR; no integration or E2E coverage |
@@ -329,18 +332,13 @@ Nothing writes them any more — `updateNotebook` no longer accepts `canvasConte
 - **The new vector space is a different space.** `lib/qdrant.ts` writes to `docsy_documents_v2` for that reason (and `convex/documents.ts` purges from the same name — the two constants must stay in step). **Every source indexed before this change has no vectors in the new collection**, so those notebooks retrieve nothing until they are re-uploaded. Delete the old collection from Qdrant once you accept that.
 - **Nothing has confirmed the pipeline actually returns vectors.** Upload a fresh document and check the point count in `docsy_documents_v2` directly. The fallback that used to hide an empty index is deleted, so chat will now say "not in your sources" for everything if this is broken — which is a symptom, not a diagnosis. Check Qdrant.
 
-### 5.3 🟠 Two overlapping UI primitive libraries
-
-`@base-ui/react` **and** `radix-ui` are both dependencies. Base UI is the successor project from the same team; `components.json` says `"style": "radix-lyra"`. You're shipping two component runtimes. Pick one and migrate `components/ui/*` (7 files — small). Same story for icons: **`lucide-react` + `@hugeicons/react` + `@hugeicons/core-free-icons`** are all installed; `components.json` sets `iconLibrary: hugeicons`. Pick one.
-
 ### 5.6 🟡 Two hand-maintained lists remain in the catalogue
 
 The catalogue is fetched from `GET https://openrouter.ai/api/v1/models`, cached an hour by Next's data cache, filtered to free models plus an allowlist, and served to the picker through `/api/models`. `resolveModel()` validates every request against it server-side, so a retired slug or a caller-invented one becomes the default instead of a 400. For the record, when this landed **16 of the 19 hardcoded slugs no longer resolved** — including `DEFAULT_MODEL` and the model `/api/audio-overview` pinned, so both features were dead.
 
 **What still rots, slowly:**
 
-- `PREMIUM_ALLOWLIST` and `FALLBACK_MODELS` in `lib/openrouter.ts` are hand-written. Dead entries in the allowlist vanish harmlessly (it is intersected with the live list), but new models never appear until someone adds them, and `FALLBACK_MODELS` — used only when the fetch fails — can go stale unnoticed. Verified live 2026-07-30.
-- `DEFAULT_MODEL` is one free slug. If OpenRouter retires it, chat falls back to a model that does not exist. Deriving the default from the live list (biggest-context free model) would close that.
+- `PREMIUM_ALLOWLIST` and `FALLBACK_MODELS` in `lib/openrouter.ts` are hand-written. Dead entries in the allowlist vanish harmlessly (it is intersected with the live list), but new models never appear until someone adds them, and `FALLBACK_MODELS` — used only when the fetch fails, and now the only path that can reach `DEFAULT_MODEL` — can go stale unnoticed. Verified live 2026-07-30.
 - The `Provider` union is hardcoded, so new vendors (poolside, inclusionai, cohere…) render under "Other" with a generic icon.
 
 (`/api/chat`'s direct OpenAI / Anthropic fallback branches are gone, along with the `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` vars they read — OpenRouter already fronts every provider.)
@@ -405,7 +403,6 @@ The pipeline is `fixed-size chunk → single embedding → top-5 cosine → stuf
 | **Naive chunking** | `chunkSize: 1000` chars, char-based, splits mid-table and mid-code-block | Structure-aware splitting (markdown headings, PDF paragraph blocks) + token-based sizing |
 | **No parent-document retrieval** | Model sees a 1000-char window with no surrounding context | Embed small chunks, return the enclosing section |
 | **No multi-query** | Single embedding, single recall shot | Generate 3 query variants, union + RRF |
-| **Citation ↔ answer not verified** | Model can emit `[7]` when only 5 sources exist; nothing checks | Post-process: validate every `[n]` against the citation array; strip or flag invalid ones |
 
 The score floor is in (`DEFAULT_SCORE_THRESHOLD = 0.5`, enforced by Qdrant). **Highest ROI from here, in order:** reranking (biggest single quality jump) → hybrid search → query rewriting.
 
@@ -554,17 +551,13 @@ The remaining phases are lower-risk and less order-dependent, so they're listed 
 
 ## 13. Quick reference: dependency actions
 
-All dependencies are on latest as of 2026-07-27 except the three in §5.7, which are blocked. `@google/generative-ai` has been replaced by `@google/genai` (§5.1).
+All dependencies are on latest as of 2026-07-27 except the three in §5.7, which are blocked. `@base-ui/react` and `lucide-react` are gone (§5.3) — radix plus `@hugeicons` is the pair to build on. `@google/generative-ai` has been replaced by `@google/genai` (§5.1).
 
 ```bash
 # Add — infrastructure
 bun add @sentry/nextjs                      # error tracking
 bun add react-resizable-panels              # UX
 bun add -d @playwright/test prettier          # `bun test` covers unit tests already
-
-# Decide (pick one from each pair, then remove the other)
-#   @base-ui/react   vs  radix-ui
-#   lucide-react     vs  @hugeicons/react + @hugeicons/core-free-icons
 
 # Then
 bun outdated && bun update --latest

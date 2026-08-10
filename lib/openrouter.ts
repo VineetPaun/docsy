@@ -59,7 +59,13 @@ export interface ModelInfo {
  */
 export type ModelId = string;
 
-/** Free tier, big context, and alive as of 2026-07-30. */
+/**
+ * Last resort, not the default. Reached only when the catalogue fetch fails and
+ * `FALLBACK_MODELS` is all there is. The default a request actually gets comes
+ * from `pickDefaultModel()` over the live list — a hardcoded slug is exactly
+ * what silently killed chat and audio when 16 of 19 ids were retired
+ * (AUDIT.md §5.6). Free tier, big context, alive as of 2026-07-30.
+ */
 export const DEFAULT_MODEL: ModelId = "google/gemma-4-31b-it:free";
 
 /**
@@ -193,15 +199,36 @@ export async function fetchModelCatalogue(): Promise<ModelInfo[]> {
 }
 
 /**
+ * The biggest-context free model on offer — the default is derived, not written
+ * down, so a retirement moves it instead of breaking it. Free tier first: the
+ * default is what an unconfigured request gets, and that should never be a
+ * model the user pays for.
+ *
+ * Exported for `lib/openrouter.test.ts`.
+ */
+export function pickDefaultModel(models: ModelInfo[]): ModelId {
+  const free = models.filter((m) => m.tier === "free");
+  const pool = free.length > 0 ? free : models;
+
+  if (pool.length === 0) return DEFAULT_MODEL;
+
+  // Ties keep the earlier entry, so the choice is stable for a given catalogue.
+  return pool.reduce((best, m) =>
+    m.contextLength > best.contextLength ? m : best
+  ).id;
+}
+
+/**
  * Server-side gate on which model a request may use. An id the catalogue does
  * not offer falls back to the default rather than being passed through — the
  * caller would otherwise be choosing what to spend.
  */
 export async function resolveModel(model?: string): Promise<ModelId> {
-  if (!model) return DEFAULT_MODEL;
-
   const catalogue = await fetchModelCatalogue();
-  return catalogue.some((entry) => entry.id === model) ? model : DEFAULT_MODEL;
+
+  if (model && catalogue.some((entry) => entry.id === model)) return model;
+
+  return pickDefaultModel(catalogue);
 }
 
 /** Group a catalogue for the picker's provider sidebar. */

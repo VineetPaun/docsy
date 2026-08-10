@@ -49,7 +49,10 @@ export default defineSchema({
     userId: v.id("users"),
     scriptText: v.optional(v.string()), // The generated script
     audioStorageId: v.optional(v.string()), // Convex storage ID for audio file
-    status: v.string(), // "pending" | "generating_script" | "synthesizing" | "ready" | "failed"
+    // "pending" | "generating_script" | "synthesizing" — non-terminal, written
+    // by /api/audio-overview as it works. Terminal: "ready", "script_only"
+    // (script but no MP3), "failed". Legacy rows may hold "generating"/"error".
+    status: v.string(),
     errorMessage: v.optional(v.string()),
     duration: v.optional(v.number()), // Audio duration in seconds
     createdAt: v.number(),

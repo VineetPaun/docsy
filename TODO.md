@@ -1,4 +1,4 @@
-# TODO — 2026-07-28
+# TODO — 2026-08-03
 
 Execution plan for tomorrow. Ordered; later tasks assume earlier ones landed.
 
@@ -18,7 +18,17 @@ Execution plan for tomorrow. Ordered; later tasks assume earlier ones landed.
 
 **Added 2026-07-30, third batch:** **embeddings migrated** to `@google/genai` + `gemini-embedding-001` (768 dims, task types, retry on 429) and the Qdrant collection bumped to `docsy_documents_v2`; **the model catalogue is live** — 16 of the 19 hardcoded slugs were dead, including `DEFAULT_MODEL` and the one `/api/audio-overview` used, so chat *and* audio were broken. `lib/openrouter.ts` now fetches from OpenRouter hourly, `/api/models` feeds the picker, and `resolveModel()` validates server-side. `tsc` clean, `lint` clean, `bun test` 19/19.
 
-**Phase 0 code is now complete apart from the storage quota (§3.5).** Everything written since 2026-07-27 is unproven.
+**Added 2026-08-03:** **notebook cap** (`MAX_NOTEBOOKS_PER_USER = 25` in `createNotebook`) — the last Phase 0 code item; cap messages now reach the user (`lib/convex-error.ts` unwraps `ConvexError.data`, used by the dashboard, the landing dropzone and the sources panel). **Full-length narration** — `lib/tts-chunks.ts` splits the script into ≤5,000-char chunks on sentence boundaries and concatenates the MP3s, so a `"long"` overview is no longer cut after the first 5,000 chars (§4.3 closed). **Durable vector purge** — `purgeVectors` reschedules itself on failure over ~2.5h (§4.1 retry closed). **`.env.example` written** — the audit claimed it landed on 2026-07-29; it never existed. `tsc` clean, `lint` clean, `bun test` 27/27.
+
+**Added later on 2026-08-03:** **audio generation no longer blocks the client** (§4.2) — the row is created `pending`, the route patches it through `generating_script` → `synthesizing` → `ready`, and the panel reads the live query, so a refresh mid-generation shows the stage instead of an empty panel. `audio-player.tsx` stopped rendering transport controls around audio that does not exist yet. `tsc` clean, `lint` clean, `bun test` 27/27.
+
+**Added 2026-08-03, third batch:** **env validation** (§10) — `lib/env.ts` + `instrumentation.ts` refuse to start the server when a boot-required variable is missing, naming all of them at once; **README is honest** — Qdrant, Gemini, ElevenLabs and Tavily/Serper are listed, `cp .env.example .env.local` replaces the partial inline block, and the four Convex-side vars plus the webhook are documented. `bun test` 32/32.
+
+**Added 2026-08-03, fourth batch:** **optimistic chat sends** (§9.2) — the user's message renders before the Convex round-trip; **chat failures stopped polluting history** (§9.5) — an inline alert with a Retry button and a toast, instead of an assistant message saved forever and replayed to the model as context. Retry re-asks without duplicating the question. `tsc` clean, `lint` clean, `bun test` 32/32.
+
+**Added 2026-08-03, fifth batch:** **chat answers stream** (§8) — `/api/chat` returns NDJSON (`meta` with citations first, then `delta` lines), `lib/openrouter.ts` gained `streamChatWithOpenRouter()`, and the chat panel renders the answer as it arrives. **No new dependency** — hand-parsed SSE beat pulling in the `ai` SDK, whose `useChat` would have had to replace the Convex message list. `bun test` 37/37.
+
+**Phase 0 code is complete.** What is left of §3.5 is a bytes quota, which is a cost control, not data exposure. Everything written since 2026-07-27 is still unproven at runtime.
 
 ⚠️ **The config surface grew.** Four env vars on the *Convex deployment* and a registered webhook, each with a different silent failure — AUDIT.md §3.1 has the symptom table. Two are new today:
 - no webhook → **no `users` row is ever created; new signups cannot use the app at all**
@@ -28,19 +38,13 @@ Background and rationale for every item: [AUDIT.md](AUDIT.md). This file is the 
 
 ---
 
-## Pre-flight — now the critical path 🔴
+## Pre-flight — configuration is in place; the runtime check is not
 
-- [ ] `cp .env.example .env.local` and fill it in — **`bun run build` cannot finish without `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`**, and none of the acceptance tests below can run without a working env
-- [ ] In the Clerk Dashboard, create the **`convex` JWT template** if it does not exist. `convex/auth.config.ts` pins `applicationID: "convex"`, which must match the token's `aud` claim — a differently-named template reads as anonymous. `lib/convex-server.ts` needs the same template, and fails closed without it (403 on search/embed/chat)
-- [ ] **Set all four vars on the Convex deployment**, not in `.env.local` — Convex functions read their own env:
-      ```bash
-      bunx convex env set CLERK_JWT_ISSUER_DOMAIN https://<your>.clerk.accounts.dev
-      bunx convex env set CLERK_WEBHOOK_SECRET whsec_...   # from the Clerk webhook page
-      bunx convex env set QDRANT_URL https://...           # vector cascade on delete
-      bunx convex env set QDRANT_API_KEY ...
-      ```
-- [ ] **Register the Clerk webhook**: Dashboard → Webhooks → endpoint `https://<deployment>.convex.site/clerk-webhook` (`.site`, **not** `.cloud`), events `user.created` / `user.updated` / `user.deleted`. Copy the signing secret into the command above.
-      ⚠️ Nothing else creates `users` rows now. Skip this and every mutation throws "User not provisioned"
+**Confirmed 2026-08-03 via `bunx convex env list`:** all four Convex-side vars are set (`CLERK_JWT_ISSUER_DOMAIN`, `CLERK_WEBHOOK_SECRET`, `QDRANT_URL`, `QDRANT_API_KEY`), and `.env.local` carries the 14 client-side ones. **This does not prove any of it works** — a var can be set to the wrong value, and `CLERK_WEBHOOK_SECRET` being present does not mean the endpoint is registered in Clerk.
+
+- [ ] In the Clerk Dashboard, confirm the **`convex` JWT template** exists. `convex/auth.config.ts` pins `applicationID: "convex"`, which must match the token's `aud` claim — a differently-named template reads as anonymous. `lib/convex-server.ts` needs the same template, and fails closed without it (403 on search/embed/chat/audio)
+- [ ] Confirm the **Clerk webhook is registered**: Dashboard → Webhooks → endpoint `https://<deployment>.convex.site/clerk-webhook` (`.site`, **not** `.cloud`), events `user.created` / `user.updated` / `user.deleted`, signing secret matching what `convex env list` shows.
+      ⚠️ Nothing else creates `users` rows. Without it every mutation throws "User not provisioned"
 - [ ] `bunx convex dev` in one terminal, `bun dev` in another. `convex dev` also regenerates `convex/_generated/` — needed for `internal.documents.purgeVectors` and the webhook's `internal.users.*` references
 - [ ] **Confirm identity arrives.** Add a throwaway query that returns `await ctx.auth.getUserIdentity()` and call it while signed in. **If it is null, stop and fix that** — everything below fails in exactly the same way, so debugging anything else first is wasted time
 - [ ] Then the real smoke test: sign in, create a notebook, upload a doc, send a chat message, delete the doc, delete the notebook. All six must work
@@ -53,6 +57,14 @@ Background and rationale for every item: [AUDIT.md](AUDIT.md). This file is the 
       - after deleting a document, its Qdrant point count drops to zero (check Qdrant directly — a stale vector is invisible from the UI until it shows up as a ghost citation)
       - a `.exe` renamed `report.pdf` is rejected with "Unsupported or unrecognised file"
       - send 6 audio-overview requests in an hour — the 6th returns 429 with a `Retry-After` header, and a `rateLimits` row exists for your user. The `convex` JWT template must be in place or every guarded route 503s instead (the limiter fails closed)
+- [ ] **Verify the 2026-08-03 batch:**
+      - create 26 notebooks — the 26th is refused with a readable toast, not a generic "Failed to create notebook"
+      - generate a `"long"` audio overview and listen to the end; it should run the whole script (~10 min), not stop at ~3.5. Expect 3 sequential ElevenLabs calls, so it takes longer to produce than before — the panel should show "Writing the script..." then "Recording the narration..." rather than a bare spinner
+      - **refresh mid-generation** — the panel must come back showing the current stage, and the audio must appear when it finishes without another click
+      - **watch a chat answer stream in** — text should appear token by token, the source header should render before the first token, and the finished message must persist across a refresh (it is written to Convex once, at the end)
+      - send a chat message with `OPENROUTER_API_KEY` unset: your question should stay in the transcript, the error should appear as a dismissible alert with a Retry button — **not** as an assistant message — and Retry should work once the key is back
+      - close the tab mid-generation, then reopen: the row is stranded non-terminal, and the generate button unblocks 10 minutes after it started. That cutoff is the known ceiling (§4.2), not a bug
+      - delete a document with `QDRANT_URL` deliberately unset on Convex, then set it back: the Convex logs should show retries about a minute apart rather than one failure, and the vectors should be gone once the variable is valid
 
 ---
 
@@ -60,7 +72,7 @@ Background and rationale for every item: [AUDIT.md](AUDIT.md). This file is the 
 
 > You can hand the public Convex URL to a stranger and lose nothing.
 
-The code for this is written. **Pre-flight is what turns it on** — a missing Convex env var means the app is broken, not that it is insecure, but you cannot tell the difference from the outside. A per-user storage quota (§3.5) stays open afterwards — a cost control, not data exposure.
+The code for this is written and the configuration is in place. **The smoke test above is the only thing that can confirm it** — a wrong Convex env value means the app is broken, not that it is insecure, but you cannot tell the difference from the outside. A per-user quota in *bytes* (§3.5) stays open afterwards — a cost control, not data exposure.
 
 ---
 
@@ -85,6 +97,6 @@ The code for this is written. **Pre-flight is what turns it on** — a missing C
 
 ## Not tomorrow
 
-Backlog lives in [AUDIT.md](AUDIT.md) §12 — Phase 1 onward: audio persistence (§4.2), durable retry for the vector purge (§4.1), env validation + CI (§10), then streaming, mobile layout, and RAG quality.
+Backlog lives in [AUDIT.md](AUDIT.md) §12 — Phase 1 onward: **async audio generation (§4.2)**, deleting the full-document chat fallback once §5.1 is confirmed (§4.6), env validation (§10), then streaming, the dashboard's mobile pass, and RAG quality.
 
 Per CLAUDE.md: **when an item here is fully done, delete the line** — no ✅, no strikethrough. Same rule as AUDIT.md.

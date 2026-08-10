@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { DocumentPreview } from "@/components/document-preview";
 import AudioPlayer from "@/components/audio-player";
 import { toast } from "sonner";
+import { convexErrorMessage } from "@/lib/convex-error";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -75,7 +76,7 @@ export function SourcesPanel({
   const [showUrlInput, setShowUrlInput] = React.useState(false);
 
   // Audio overview state
-  const [isGeneratingAudio, setIsGeneratingAudio] = React.useState(false);
+
   // Audio itself is not held here — it lives in Convex storage and arrives as a
   // URL on the reactive query. Only the script is mirrored locally, so it shows
   // immediately after generation.
@@ -95,6 +96,9 @@ export function SourcesPanel({
   const generateUploadUrl = useMutation(api.documents.generateUploadUrl);
   const createAudioOverview = useMutation(
     api.audioOverviews.createAudioOverview
+  );
+  const updateAudioOverview = useMutation(
+    api.audioOverviews.updateAudioOverview
   );
 
   // Query for existing audio overview
@@ -279,7 +283,26 @@ export function SourcesPanel({
     }
   };
 
-  // Handle generating audio overview
+  /**
+   * Kick off an audio overview and stop waiting for it.
+   *
+   * The row is created `pending` first, the route patches it through
+   * `generating_script` → `synthesizing` → `ready`, and the live query above
+   * drives the UI. That is what makes a refresh mid-generation show the current
+   * stage instead of an empty panel (AUDIT.md §4.2).
+   *
+   * The request is deliberately not awaited — awaiting it was the whole
+   * problem. Its only remaining job is to catch the failures the route cannot
+   * report itself: a 429 from the rate limiter, a 403, or the request dying
+   * before it started.
+   *
+   * ponytail: closing the tab still aborts the request, leaving the row in a
+   * non-terminal status. `isGeneratingAudio` below releases a row older than
+   * the cutoff, so the panel recovers on its next render — no timer, which
+   * means a row going stale with the panel already open needs one more render
+   * (any interaction, or a refresh) to clear. A Convex action or a cron sweep
+   * is the durable version, worth it if strandings actually happen.
+   */
   const handleGenerateAudioOverview = async () => {
     if (!documents || documents.length === 0) {
       toast.warning(
@@ -288,69 +311,92 @@ export function SourcesPanel({
       return;
     }
 
-    setIsGeneratingAudio(true);
     setAudioScript(undefined);
 
+    let overviewId: string;
     try {
-      // Create a "generating" record
-      await createAudioOverview({
+      overviewId = await createAudioOverview({
         notebookId: notebookId as never,
-        status: "generating",
+        status: "pending",
       });
-
-      // Only the notebook id goes over the wire — the route reads the source
-      // text from Convex itself, and rejects a notebook with nothing to
-      // narrate (AUDIT.md §4.7).
-      const response = await fetch("/api/audio-overview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          notebookId,
-          notebookTitle: "Your Research",
-          duration: "short", // 3-5 minutes
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || "Failed to generate audio overview");
-      }
-
-      // Persist the storage id — the reactive query picks it up and resolves it
-      // to a playable URL, so nothing here holds the audio in memory.
-      await createAudioOverview({
-        notebookId: notebookId as never,
-        status: data.audio?.available ? "ready" : "script_only",
-        scriptText: data.script,
-        audioStorageId: data.audio?.storageId,
-        duration: data.estimatedDuration,
-      });
-
-      setAudioScript(data.script);
-
-      toast.success(
-        data.audio?.available
-          ? "Audio overview generated!"
-          : `Script ready. ${data.audio?.message ?? "Audio unavailable"}.`
-      );
     } catch (error) {
-      // Update record with error
-      await createAudioOverview({
-        notebookId: notebookId as never,
-        status: "error",
-        errorMessage: error instanceof Error ? error.message : "Unknown error",
+      toast.error(
+        convexErrorMessage(error, "Failed to start the audio overview")
+      );
+      return;
+    }
+
+    // Only the notebook id and the row go over the wire — the route reads the
+    // source text from Convex itself, and rejects a notebook with nothing to
+    // narrate (AUDIT.md §4.7).
+    fetch("/api/audio-overview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        notebookId,
+        notebookTitle: "Your Research",
+        duration: "short", // 3-5 minutes
+        overviewId,
+      }),
+    })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.success) {
+          throw new Error(data.error || "Failed to generate audio overview");
+        }
+      })
+      .catch(async (error) => {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Failed to generate audio overview";
+
+        // The route marks its own failures; this covers the ones it never saw.
+        await updateAudioOverview({
+          overviewId: overviewId as never,
+          status: "failed",
+          errorMessage: message,
+        }).catch(() => {
+          // Nothing left to do — the staleness cutoff releases the row.
+        });
+
+        toast.error(message);
       });
 
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : "Failed to generate audio overview"
-      );
-    } finally {
-      setIsGeneratingAudio(false);
-    }
+    toast.info("Generating your audio overview — this takes a minute or two.");
   };
+
+  /**
+   * Generation is in flight when the latest row sits in a non-terminal status.
+   *
+   * Derived rather than local state, so a refresh or a second tab shows the
+   * spinner too. A row older than the cutoff is treated as finished regardless:
+   * the request behind it is gone (the tab that made it closed), and a
+   * permanent spinner would also block regenerating. Legacy rows written before
+   * this used "generating", which counts as non-terminal by the same rule.
+   */
+  const STALE_AFTER_MS = 10 * 60_000;
+  const TERMINAL_STATUSES = ["ready", "script_only", "failed", "error"];
+
+  const isGeneratingAudio = Boolean(
+    existingAudioOverview &&
+      !TERMINAL_STATUSES.includes(existingAudioOverview.status) &&
+      Date.now() - existingAudioOverview.createdAt < STALE_AFTER_MS
+  );
+
+  // The point of reporting status at all: the stage is worth more than a
+  // spinner when the wait is a minute or more.
+  const AUDIO_STAGE_LABELS: Record<string, string> = {
+    pending: "Starting...",
+    generating_script: "Writing the script...",
+    synthesizing: "Recording the narration...",
+    generating: "Generating...",
+  };
+
+  const audioStageLabel = isGeneratingAudio
+    ? (AUDIO_STAGE_LABELS[existingAudioOverview?.status ?? ""] ??
+      "Generating...")
+    : null;
 
   // Mirror a persisted script into local state. The audio URL is read straight
   // from the query at render time — it needs no local copy.
@@ -438,8 +484,12 @@ export function SourcesPanel({
 
         succeeded++;
       } catch (error) {
-        const reason =
-          error instanceof Error ? error.message : "Please try again.";
+        // The 50-source cap is a ConvexError, whose readable text lives on
+        // `.data` rather than on `.message`.
+        const reason = convexErrorMessage(
+          error,
+          error instanceof Error ? error.message : "Please try again."
+        );
         toast.error(`${file.name}: ${reason}`);
       }
     }
@@ -923,6 +973,7 @@ export function SourcesPanel({
                 title="Audio Overview"
                 onRegenerate={handleGenerateAudioOverview}
                 isGenerating={isGeneratingAudio}
+                stageLabel={audioStageLabel ?? undefined}
               />
             ) : (
               <div className="bg-gradient-to-br from-purple-900/10 to-blue-900/10 border border-purple-500/20 rounded-lg p-4">
@@ -953,6 +1004,12 @@ export function SourcesPanel({
                     </p>
                   </div>
                 </div>
+                {existingAudioOverview?.status === "failed" &&
+                  existingAudioOverview.errorMessage && (
+                    <p className="text-xs text-destructive mt-3">
+                      {existingAudioOverview.errorMessage}
+                    </p>
+                  )}
                 <Button
                   className="w-full mt-3 bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 text-white"
                   onClick={handleGenerateAudioOverview}
@@ -982,7 +1039,7 @@ export function SourcesPanel({
                           d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                         />
                       </svg>
-                      Generating...
+                      {audioStageLabel}
                     </>
                   ) : (
                     <>

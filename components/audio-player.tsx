@@ -22,6 +22,8 @@ interface AudioPlayerProps {
   title?: string;
   onRegenerate?: () => void;
   isGenerating?: boolean;
+  /** Stage text while generating, e.g. "Recording the narration...". */
+  stageLabel?: string;
 }
 
 export default function AudioPlayer({
@@ -30,6 +32,7 @@ export default function AudioPlayer({
   title = "Audio Overview",
   onRegenerate,
   isGenerating = false,
+  stageLabel,
 }: AudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
@@ -212,8 +215,14 @@ export default function AudioPlayer({
     return null;
   }
 
-  // If we have script but no audio, show script-only view
-  const isScriptOnly = !audioSource && scriptText && !isGenerating;
+  /**
+   * Transport controls need something to play.
+   *
+   * This used to exclude the generating case, which meant a script patched in
+   * mid-generation (status `synthesizing`) rendered a full player around a dead
+   * progress bar and a play button that did nothing.
+   */
+  const hasNoAudio = !audioSource;
 
   return (
     <div className="bg-gradient-to-br from-purple-900/20 to-blue-900/20 border border-purple-500/30 rounded-xl p-4">
@@ -231,9 +240,11 @@ export default function AudioPlayer({
           <div>
             <h3 className="font-semibold text-sm">{title}</h3>
             <p className="text-xs text-muted-foreground">
-              {isScriptOnly
-                ? "Script ready"
-                : `${formatTime(duration)} • AI-generated podcast`}
+              {isGenerating
+                ? (stageLabel ?? "Generating...")
+                : hasNoAudio
+                  ? "Script ready"
+                  : `${formatTime(duration)} • AI-generated podcast`}
             </p>
           </div>
         </div>
@@ -253,7 +264,7 @@ export default function AudioPlayer({
               Regenerate
             </Button>
           )}
-          {!isScriptOnly && (
+          {!hasNoAudio && (
             <Button
               variant="ghost"
               size="icon"
@@ -269,7 +280,7 @@ export default function AudioPlayer({
       </div>
 
       {/* Progress bar - only show if we have audio */}
-      {!isScriptOnly && (
+      {!hasNoAudio && (
         <>
           <div
             ref={progressRef}
@@ -301,7 +312,7 @@ export default function AudioPlayer({
       )}
 
       {/* Controls - show only if we have audio */}
-      {!isScriptOnly && (
+      {!hasNoAudio && (
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             {/* Restart */}
@@ -382,8 +393,8 @@ export default function AudioPlayer({
         </div>
       )}
 
-      {/* Script-only mode - show transcript button */}
-      {isScriptOnly && scriptText && (
+      {/* No audio (yet): the script is all there is to show */}
+      {hasNoAudio && scriptText && (
         <div className="flex flex-col items-center gap-3">
           <Button
             variant="outline"

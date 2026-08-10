@@ -40,7 +40,7 @@ bun run lint         # eslint
 
 CI (`.github/workflows/ci.yml`) runs `tsc --noEmit`, `eslint` and `bun test` on push and PR — not `next build`, which needs a real Clerk key.
 
-`bun test` runs the five test files that exist (`lib/qdrant.test.ts` — page-number attribution; `lib/file-type.test.ts` — magic-byte sniffing; `lib/rate-limit.test.ts` — fixed-window maths; `lib/embeddings.test.ts` — retry predicate; `lib/openrouter.test.ts` — model catalogue filter). There is **no broader suite**, so passing tests are never evidence a feature works end-to-end.
+`bun test` runs the seven test files that exist (`lib/qdrant.test.ts` — page-number attribution; `lib/file-type.test.ts` — magic-byte sniffing; `lib/rate-limit.test.ts` — fixed-window maths; `lib/embeddings.test.ts` — retry predicate; `lib/openrouter.test.ts` — model catalogue filter; `lib/tts-chunks.test.ts` — narration splitting; `lib/env.test.ts` — the boot-required env check). There is **no broader suite**, so passing tests are never evidence a feature works end-to-end.
 
 ## ⚠️ Read before writing code
 
@@ -105,6 +105,10 @@ convex/
   *.ts                  schema + queries/mutations
 lib/
   api-auth.ts           requireApiAuth() — the 401 guard every route calls
+  env.ts                assertRequiredEnv() — called from instrumentation.ts, so
+                        a missing Clerk key stops the server instead of turning
+                        every request into a confusing auth failure. Only the
+                        boot-required vars belong here; feature keys 503 by name
   rate-limit.ts         enforceRateLimit() — 429 guard on the paid routes;
                         budgets live in convex/users.ts, never in the caller
   convex-server.ts      requireNotebookOwner / requireDocumentOwner — the 403
@@ -112,6 +116,12 @@ lib/
   url-guard.ts          SSRF-safe fetch for user-supplied URLs
   file-type.ts          sniffFileType() — magic bytes decide an upload's type;
                         file.type is never trusted
+  tts-chunks.ts         splitForTts() / concatAudio() — narration is split into
+                        ≤5,000-char ElevenLabs requests and the MP3s joined, so
+                        a long script is narrated in full
+  convex-error.ts       convexErrorMessage() — a ConvexError's readable text is
+                        on `.data`, not `.message`. Use it wherever a cap or
+                        quota error reaches a toast
   mock-data.ts          dashboard placeholders when Convex isn't configured
   openrouter.ts         catalogue fetched from OpenRouter (1h cache) + chat call.
                         resolveModel() is the server-side gate on which model a

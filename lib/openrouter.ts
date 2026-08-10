@@ -240,14 +240,26 @@ export interface OpenRouterResponse {
   };
 }
 
-export async function chatWithOpenRouter(
+interface CompletionOptions {
+  temperature?: number;
+  maxTokens?: number;
+}
+
+/**
+ * POST a completion request and hand back the raw response.
+ *
+ * Shared by the buffered and streaming callers so the key check, the
+ * attribution headers, model resolution and OpenRouter's error shape live in one
+ * place.
+ *
+ * @throws if the key is missing or OpenRouter returns a non-2xx
+ */
+async function postCompletion(
   messages: ChatMessage[],
-  model: ModelId = DEFAULT_MODEL,
-  options?: {
-    temperature?: number;
-    maxTokens?: number;
-  },
-): Promise<string> {
+  model: ModelId,
+  options: CompletionOptions | undefined,
+  stream: boolean,
+): Promise<Response> {
   const apiKey = process.env.OPENROUTER_API_KEY;
 
   if (!apiKey) {
@@ -274,6 +286,7 @@ export async function chatWithOpenRouter(
         messages,
         temperature: options?.temperature ?? 0.7,
         max_tokens: options?.maxTokens ?? 2000,
+        ...(stream ? { stream: true } : {}),
       }),
     },
   );
@@ -300,6 +313,86 @@ export async function chatWithOpenRouter(
       );
     }
   }
+
+  return response;
+}
+
+/**
+ * Interpret one line of an OpenAI-dialect SSE stream.
+ *
+ * @returns `"done"` at the terminator, the delta text for a content chunk, or
+ * `null` for anything with no text in it — keep-alive comments, role-only first
+ * chunks, `usage` frames, and malformed JSON. Skipping rather than throwing
+ * matters: one bad keep-alive must not kill a good answer mid-sentence.
+ */
+export function parseStreamLine(line: string): string | "done" | null {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("data:")) return null;
+
+  const payload = trimmed.slice(5).trim();
+  if (payload === "[DONE]") return "done";
+
+  try {
+    const parsed = JSON.parse(payload);
+    const text = parsed.choices?.[0]?.delta?.content;
+    return typeof text === "string" && text.length > 0 ? text : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Stream a completion, yielding text as the model produces it.
+ *
+ * OpenRouter speaks the OpenAI SSE dialect: `data: {json}` lines, `data: [DONE]`
+ * to finish, and periodic `: comment` keep-alives. Parsed by hand rather than
+ * with the Vercel AI SDK — this is the only streaming call in the app, and
+ * `useChat` would fight the Convex-persisted message list it would have to
+ * replace (AUDIT.md §8).
+ *
+ * A chunk that does not parse is skipped: a malformed keep-alive must not kill a
+ * good answer mid-sentence.
+ */
+export async function* streamChatWithOpenRouter(
+  messages: ChatMessage[],
+  model: ModelId = DEFAULT_MODEL,
+  options?: CompletionOptions,
+): AsyncGenerator<string> {
+  const response = await postCompletion(messages, model, options, true);
+
+  if (!response.body) {
+    throw new Error("OpenRouter returned no response body");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+
+    // Complete lines only — a chunk boundary can land mid-line, and the
+    // remainder stays in the buffer until the rest of it arrives.
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      const parsed = parseStreamLine(line);
+      if (parsed === "done") return;
+      if (parsed) yield parsed;
+    }
+  }
+}
+
+export async function chatWithOpenRouter(
+  messages: ChatMessage[],
+  model: ModelId = DEFAULT_MODEL,
+  options?: CompletionOptions,
+): Promise<string> {
+  const response = await postCompletion(messages, model, options, false);
 
   const data = await response.json();
 

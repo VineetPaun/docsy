@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  chatWithOpenRouter,
   resolveModel,
+  streamChatWithOpenRouter,
   type ChatMessage,
 } from "@/lib/openrouter";
 import { generateEmbedding } from "@/lib/embeddings";
@@ -226,21 +226,56 @@ INSTRUCTIONS:
       })),
     ];
 
-    const assistantMessage = await chatWithOpenRouter(
-      chatMessages,
-      selectedModel,
-      {
-        temperature: 0.7,
-        maxTokens: 2000,
-      }
-    );
+    // NDJSON, one object per line: a single `meta` line, then `delta` lines as
+    // the model produces text, then `done`. Retrieval has already finished at
+    // this point, so citations go out before the first token rather than after
+    // the last — the client can render the source header while the answer is
+    // still being written (AUDIT.md §8).
+    const encoder = new TextEncoder();
+    const line = (value: unknown) => encoder.encode(`${JSON.stringify(value)}\n`);
 
-    return NextResponse.json({
-      message: assistantMessage,
-      // Names of the sources the answer could draw on, for the header line.
-      sources: documents.slice(0, 3).map((d) => d.name),
-      citations,
-      model: selectedModel,
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        controller.enqueue(
+          line({
+            type: "meta",
+            // Names of the sources the answer could draw on, for the header line.
+            sources: documents.slice(0, 3).map((d) => d.name),
+            citations,
+            model: selectedModel,
+          })
+        );
+
+        try {
+          for await (const text of streamChatWithOpenRouter(
+            chatMessages,
+            selectedModel,
+            { temperature: 0.7, maxTokens: 2000 }
+          )) {
+            controller.enqueue(line({ type: "delta", text }));
+          }
+
+          controller.enqueue(line({ type: "done" }));
+        } catch {
+          // The HTTP status is already 200 by the time streaming starts, so a
+          // mid-stream failure has to be reported in-band. Details stay
+          // server-side (AUDIT.md §6.5).
+          controller.enqueue(
+            line({ type: "error", message: "Failed to complete the answer" })
+          );
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "application/x-ndjson; charset=utf-8",
+        // Streaming dies behind a buffering proxy without these.
+        "Cache-Control": "no-store, no-transform",
+        "X-Accel-Buffering": "no",
+      },
     });
   } catch {
     // Internal error details stay server-side — they leaked upstream API

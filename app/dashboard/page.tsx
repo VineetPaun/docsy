@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useConvexAvailable } from "@/components/providers/convex-provider";
 import { mockNotebooks } from "@/lib/mock-data";
+import { convexErrorMessage } from "@/lib/convex-error";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -70,8 +71,10 @@ export default function DashboardPage() {
         });
         setNewTitle("");
         setIsCreating(false);
-      } catch {
-        toast.error("Failed to create notebook");
+      } catch (error) {
+        // The notebook cap arrives as a ConvexError; a generic toast would make
+        // it look like a bug rather than a limit the user can act on.
+        toast.error(convexErrorMessage(error, "Failed to create notebook"));
       }
     } else {
       // Mock create

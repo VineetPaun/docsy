@@ -47,13 +47,20 @@ Bare record of what has been removed, so nobody re-audits it as a fresh finding.
 | 2026-07-30 | §5.1 — deprecated `@google/generative-ai` + `text-embedding-004`, no retry | `lib/embeddings.ts` rewritten on `@google/genai` + `gemini-embedding-001` (`outputDimensionality: 768`), `RETRIEVAL_DOCUMENT` / `RETRIEVAL_QUERY` task types, one `embedContent` call per batch with exponential backoff on 429/5xx (`lib/embeddings.test.ts`). Qdrant collection versioned to `docsy_documents_v2` — the vector space changed, so old points are not comparable. **Re-indexing and a runtime check remain — see §5.1** |
 | 2026-07-30 | §5.6 — hardcoded model catalogue, 16 of 19 slugs dead | `lib/openrouter.ts` fetches `GET /api/v1/models` (1h cache) → free models + `PREMIUM_ALLOWLIST`, `resolveModel()` validates server-side, `/api/models` feeds the picker, `OPENROUTER_MODELS` / `isValidModel` / `VALID_MODEL_IDS` deleted. `ModelId` is now `string`; the client no longer validates. Filter and mapping covered by `lib/openrouter.test.ts`. **Two hand-kept lists remain — see §5.6** |
 | 2026-07-30 | §4.7 — `/api/audio-overview` took its source text from the request body and never checked ownership | route calls `requireNotebookOwner()` then `notebookDocuments()`; `documents` is gone from `AudioOverviewRequest`, and the client posts a notebook id only. A notebook with nothing narratable is a 400 from the route rather than a client-side guard |
-| 2026-07-30 | §4.4 — the "two-host podcast" was read by one voice | the prompt now writes a single-narrator episode; the `ALEX:`/`SAM:` label strip stays as a guard against a model that ignores it. Two voices is a feature, and belongs with §4.3 |
+| 2026-07-30 | §4.4 — the "two-host podcast" was read by one voice | the prompt now writes a single-narrator episode; the `ALEX:`/`SAM:` label strip stays as a guard against a model that ignores it. Two voices is a feature, and lives in §11 Tier 1 |
 | 2026-07-30 | §6.6 — demo mode faked output when keys were missing | `generateDemoResponse`, `generateDemoResults` and `generateDemoReport` deleted (~300 lines); `/api/chat`, `/api/web-search` and `/api/research` return **503 naming the missing variable**. No `NEXT_PUBLIC_DEMO_MODE` flag was added — no caller read `isDemo`, so nothing wanted the mode kept |
 | 2026-07-30 | §4.11 — `updateNotebook` still wrote canvas fields | `canvasContent` / `canvasHtml` args and their writes gone from `convex/notebooks.ts`. **The schema fields survive until a migration — that residual is still §4.11** |
 | 2026-07-30 | §9.4 — accessibility gaps | `aria-label` on every icon-only control (send, seek, play/pause, mute, restart, download, speed, per-source delete, close, GitHub) and on the per-source checkbox; `role="status"` on the loading spinners; the landing dropzone got a keyboard path (`sr-only` file input + overlay `<label>`, `focus-within` ring) — it was `div onClick` with a `display:none` input; the audio progress bar is a keyboard slider (arrows/Home/End); the citation tooltip opens on focus and closes on Escape, with `aria-describedby`; `prefers-reduced-motion` honoured globally in `app/globals.css`; a dead unlabelled grid button deleted from the sources header. **Focus trapping and a real audit pass remain — see §9.4** |
+| 2026-08-03 | §8 — `/api/chat` awaited the whole completion before replying | `lib/openrouter.ts` `streamChatWithOpenRouter()` (+ `parseStreamLine()`, tested) and a shared `postCompletion()`; the route returns NDJSON — one `meta` line carrying citations, sources and model, then `delta` lines, then `done` — and `notebook-chat.tsx` renders the in-flight answer by appending a synthetic message to the transcript, so the existing bubble, markdown and citation handling are reused. **No `ai` SDK dependency**: this is the app's only streaming call, and `useChat` would have had to replace the Convex-persisted message list. A mid-stream failure is reported in-band and the partial answer is discarded rather than saved |
+| 2026-08-03 | §9.2 — no optimistic UI · §9.5 — chat errors persisted into message history | `notebook-chat.tsx` — `addMessage` carries a `withOptimisticUpdate`, so the user's message renders before the Convex round-trip; failures now set a `failure` state that renders an inline `role="alert"` banner with a Retry button plus a `sonner` toast, instead of writing `"Sorry, I encountered an error: …"` into the `messages` table where it polluted history and fed back as context. `requestAnswer()` is split out so a retry re-asks without re-posting the user's message |
+| 2026-08-03 | §10 — no env validation; README documented 5 of 14 vars | `lib/env.ts` + `instrumentation.ts` — the server refuses to start when a boot-required variable is missing, naming all of them at once (`lib/env.test.ts`). Deliberately only the Clerk pair: Convex has a mock-data path and the feature keys already 503 with their own name, so requiring them would trade a good error for a worse one. README now lists Qdrant, Gemini, ElevenLabs and Tavily/Serper, points at `.env.example`, and documents the four Convex-side vars plus the webhook. **Prettier, Sentry and LLM observability are still open — see §10** |
+| 2026-08-03 | §4.2 — the client blocked on the whole generation | Row created `pending` before the call; `/api/audio-overview` patches it through `generating_script` → `synthesizing` → `ready` / `script_only` / `failed` via `progressReporter()` (as the calling user, so `updateAudioOverview` still checks the owner); `sources-panel.tsx` fires the request without awaiting it and derives `isGeneratingAudio` from the row, with a 10-minute staleness cutoff; `audio-player.tsx` no longer renders transport controls around audio that does not exist yet. **Tab-close durability stays as §4.2** |
+| 2026-08-03 | §4.3 — ElevenLabs truncated narration at 5,000 chars | `lib/tts-chunks.ts` — `splitForTts()` splits on sentence boundaries (word boundaries when one sentence is over-long), `concatAudio()` joins the MP3 segments; `/api/audio-overview` makes one sequential request per chunk, capped at `MAX_TTS_CHUNKS = 8`. `audio.truncated` and `estimatedDuration` now describe what was really narrated, and a mid-script TTS failure keeps the audio bought so far. Covered by `lib/tts-chunks.test.ts` |
+| 2026-08-03 | §4.1 — a failed vector purge was never retried | `convex/documents.ts` `purgeVectors` reschedules itself on failure (`PURGE_RETRY_DELAYS_S` — 1min/5min/25min/2h) and gives up with a named log line. Safe only because it is an action; the same code in a mutation would roll the schedule back. **`QDRANT_URL` residual stays as §4.1** |
+| 2026-08-03 | §10 — `.env.example` did not actually exist | The 2026-07-29 row below was wrong: the file was never written, and `git ls-files` had no trace of it. Now present with all 14 client-side vars, the four Convex-deployment ones, and the silent-failure table |
 | 2026-07-29 | §4.5 — source selection never reached retrieval · §4.7 — full document text posted per chat message | `/api/chat` takes `documentIds` instead of `documents` and loads the text itself via `notebookDocuments()` (`lib/convex-server.ts`); the selection filters both retrieval (`searchChunks({ documentIds })`) and the no-RAG fallback; `selectedDocs` lifted from `sources-panel.tsx` to `app/notebook/[id]/page.tsx` so chat can read it. Empty selection = whole notebook. **`/api/audio-overview` still takes body text — that residual is now §4.7** |
 
-Partial progress on §3.5, §4.3, §4.6, §4.9, §5.6 and §6.5 is folded into those sections; what remains of §3.2 — the routes authenticate but never check *ownership* — is now §3.6, and is no longer blocked. **§3.1 is now only about moving user provisioning out of the browser into a Clerk webhook** — the data-exposure half is closed, pending the runtime check called out in that section.
+Partial progress on §3.5, §4.6, §4.9, §5.6 and §6.5 is folded into those sections; what remains of §3.2 — the routes authenticate but never check *ownership* — is now §3.6, and is no longer blocked. **§3.1 is now only about moving user provisioning out of the browser into a Clerk webhook** — the data-exposure half is closed, pending the runtime check called out in that section.
 
 **Verification status:** `bunx tsc --noEmit` passes and `bun run lint` is clean (0 errors, 0 warnings) as of 2026-07-28. `bun run build` compiles + typechecks but cannot *finish* here because prerendering `/_not-found` needs `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and no `.env` exists in this checkout — that is §10, not a code defect. **No runtime behaviour has been exercised**, so treat the §12 acceptance criteria as *not yet demonstrated*.
 
@@ -162,12 +169,12 @@ The problem is that it was built fast and never hardened. At the time of the aud
 |---|---|---|
 | Feature breadth | **A−** | Ambitious and mostly delivered |
 | Security | **B−** | IDOR closed, routes check ownership, rate limits in place; unproven at runtime, no storage quota |
-| Data integrity | **D** | Deletes leave orphans everywhere; audio never persisted |
+| Data integrity | **B−** | Deletes cascade and retry; audio persists and is narrated in full. Unproven at runtime |
 | Dependency health | **B** | Deprecated Google SDK replaced; 3 packages pinned back on upstream blockers (§5.7) |
 | RAG quality | **C** | Works, but naive — no reranking, no hybrid, top-5 fixed |
 | Code quality | **B−** | 1200-line god component remains; `console.*` and `any` now effectively zero |
-| Testing / CI | **D** | 3 unit test files + CI on push/PR; no integration or E2E coverage |
-| Performance / cost | **C−** | Rate limits and bounded payloads in; still no streaming, no caching |
+| Testing / CI | **D+** | 7 unit test files + CI on push/PR; no integration or E2E coverage |
+| Performance / cost | **C** | Rate limits, bounded payloads, streamed answers and optimistic sends; no caching, and `.collect()` + JS sort is still everywhere (§8) |
 | Mobile / a11y | **C** | Notebook page is responsive now; dashboard is not. Accessible names, keyboard paths and reduced-motion are in; focus management and any real audit are not (§9.4) |
 
 ### The 3 things to do this week
@@ -256,11 +263,11 @@ curl -X POST https://<deployment>.convex.site/clerk-webhook -d '{"type":"user.de
 
 **Known race:** a brand-new signup can reach the dashboard before the webhook lands. Queries return empty (`getUser` → null, handled everywhere) and reactive queries fill in when the row appears, but a mutation fired in that window throws "User not provisioned". Retrying works. Worth a proper loading state if it proves visible in practice.
 
-### 3.5 🟠 No per-user storage quota
+### 3.5 🟡 No per-user storage quota in bytes
 
-Bounded now: 10 MB per file, 20 files per drop (UX), and `MAX_DOCUMENTS_PER_NOTEBOOK = 50` enforced in `createDocument`. Type comes from `sniffFileType()` reading magic bytes, not from `file.type`.
+Bounded now: 10 MB per file, 20 files per drop (UX), `MAX_DOCUMENTS_PER_NOTEBOOK = 50` in `createDocument`, and `MAX_NOTEBOOKS_PER_USER = 25` in `createNotebook`. Both caps throw a `ConvexError` whose text reaches the user — `lib/convex-error.ts` unwraps `.data`, which the dashboard, the landing dropzone and the sources panel all now use instead of a generic toast. Type comes from `sniffFileType()` reading magic bytes, not from `file.type`.
 
-**What remains:** nothing caps a user's *total* storage, and nothing caps notebooks per user. 50 sources × unlimited notebooks is still unbounded paid storage. A `getNotebookCount` check in `createNotebook` plus a summed-bytes column would close it; both need a product decision on the actual limits first.
+**What remains:** the ceiling is a count, not a size — 25 × 50 × 10 MB is a 12.5 GB worst case per account. A summed-bytes column on `users`, maintained on upload and on cascade delete, would make it a real quota; nothing needs it until an account gets close enough for the difference to cost money. `getNotebookCount` (`convex/notebooks.ts`) exists for a UI hint and is still uncalled by the client.
 
 ⚠️ The sniffer is the only type check, so `/api/process-document` is now load-bearing for *every* upload including plain text — both dropzones route through it. Do not add a client-side shortcut that reads a file locally to "save a round trip"; that reopens the hole.
 
@@ -273,28 +280,21 @@ Bounded now: 10 MB per file, 20 files per drop (UX), and `MAX_DOCUMENTS_PER_NOTE
 
 ## 4. Correctness & data-integrity bugs
 
-### 4.1 🟠 Vector cascade depends on Convex env, and is not retried
+### 4.1 🟡 Vector cascade depends on Convex env
 
-Cascade deletion is complete and server-side: `convex/lib/cascade.ts` is the single path for documents, notebooks and accounts, covering rows, messages, audio overviews, storage files and vectors.
+Cascade deletion is complete and server-side: `convex/lib/cascade.ts` is the single path for documents, notebooks and accounts, covering rows, messages, audio overviews, storage files and vectors. A failed purge now retries itself four times over ~2.5 hours before giving up (`PURGE_RETRY_DELAYS_S` in `convex/documents.ts`), so a transient Qdrant outage no longer orphans vectors permanently.
 
-**Two operational residuals:**
+**One operational residual:**
 
-- **`QDRANT_URL` must be set on the Convex deployment** or `purgeVectors` throws and vectors survive — the ghost-citation bug returns, with no client fallback any more (the best-effort `fetch` was deleted deliberately: "never rely on the client to clean up"). The throw is visible in the Convex logs and nowhere else.
-- **A failed purge is not retried.** `scheduler.runAfter` fires once; if Qdrant is down at that moment the vectors are orphaned permanently and nothing notices. A `vectorPurgeQueue` table with a cron sweep would make it durable — worth it only once there is real data to lose.
+- **`QDRANT_URL` must be set on the Convex deployment** or `purgeVectors` has nothing to talk to; it now retries rather than failing once, but a variable that is missing stays missing, so after the last attempt the vectors survive and deleted documents come back as ghost citations. There is no client fallback (the best-effort `fetch` was deleted deliberately: "never rely on the client to clean up"), and the give-up message is visible in the Convex logs and nowhere else. Retries do not survive a deployment losing its scheduled jobs — a `vectorPurgeQueue` table with a cron sweep is the durable version, worth building only if orphans actually show up.
 
-### 4.2 🟡 Audio generation is still synchronous
+### 4.2 🟡 Audio generation does not survive the tab closing
 
-Audio now persists: the route uploads the MP3 to Convex storage and returns a `storageId`, `getAudioOverview` hands back a signed URL, and the ~4 MB base64 response body — at or over **Vercel's 4.5 MB limit** — is gone. Refreshing keeps the audio.
+The client no longer waits: it creates the row as `pending`, fires the request without awaiting it, and the live query drives the UI. `/api/audio-overview` patches the row through `generating_script` → `synthesizing` (persisting the script at that point, since TTS is the slow, paid, failure-prone half) → `ready` / `script_only` / `failed`. A refresh mid-generation shows the current stage rather than an empty panel, and the stage text replaced the bare spinner.
 
-**What remains:** the request still blocks for the whole 30–60s of script generation plus TTS, so `maxDuration = 300` is load-bearing and a slow ElevenLabs call leaves the user on a spinner with no progress. The `status` field is already modelled for the async version (`pending` / `generating_script` / `synthesizing` / `ready` / `failed`) but only ever holds `generating` → `ready` / `script_only` / `error`.
+**What remains:** the work still runs inside a Next request, so **closing the tab aborts it** and leaves the row non-terminal. The client treats a non-terminal row older than 10 minutes as finished, which unblocks regeneration without a backend sweep — but the abandoned request is not resumed, and the cutoff is evaluated at render time, so a row going stale in an already-open panel needs one more render to clear.
 
-**Fix:** create the row as `pending`, run generation in a Convex action, let the live query drive the UI. Pairs naturally with §4.3 (chunking the script across several TTS calls), which makes the wait longer still.
-
-### 4.3 🟠 ElevenLabs truncates the script at 5,000 chars
-
-`synthesizeWithElevenLabs` still cuts narration at `TTS_CHAR_LIMIT` (5,000). A `"long"` script targets 1,500–2,000 words ≈ 9,000–12,000 chars, so **more than half the podcast is still cut**. The response no longer lies about it — `estimatedDuration` is now measured over the narrated portion only, and `audio.truncated` flags the cut — but the audio itself is incomplete.
-
-**Fix:** chunk the script and concatenate the audio segments, or use the ElevenLabs long-form endpoint. ⚠️ **Do §4.2 first.** Full-length audio at ElevenLabs' default bitrate is several MB; base64'd into the JSON body it blows straight past Vercel's 4.5 MB response limit. Lifting the truncation before audio moves to Convex storage turns a partial feature into a broken one.
+**Fix, if strandings show up in practice:** run generation in a Convex action (durable, survives the client entirely) or sweep non-terminal rows on a cron. Neither is worth building before there is evidence the abort actually happens to real users. ⚠️ The action route is not a lift-and-shift: `resolveModel()` leans on Next's fetch cache, which does not exist in the Convex runtime.
 
 ### 4.6 🟠 Full-document fallback still stuffs the prompt
 
@@ -423,8 +423,6 @@ Add a small **eval harness** (20–30 Q/A pairs over a fixed corpus, scored on r
 
 | Issue | Where | Fix |
 |---|---|---|
-| **No streaming** | `/api/chat` awaits the full completion, then returns JSON. On a free 70B model that's 10–40s of blank screen. | Stream with the Vercel AI SDK (`streamText` + `useChat`). Biggest perceived-performance win available. |
-| **4 MB base64 audio response** | `audio-overview/route.ts` | See §4.2 — return a storage ID. |
 | **Sequential document uploads** | `sources-panel.tsx` `handleFiles` — a `for` loop awaiting extract→upload→embed per file | Parallelize with a concurrency limit (3–4); show per-file progress. |
 | **`.collect()` everywhere + JS sort** | `notebooks.ts:22`, `documents.ts:27`, `messages.ts:27`, etc. — loads every row then sorts in memory | Add sorted indexes (`by_notebook_timestamp`) and use `.order("desc").take(n)`. Chat history will be the first to hurt. |
 | **No caching** | Identical questions re-embed and re-infer every time | Cache embeddings by content hash; add OpenRouter prompt caching for the system prompt. |
@@ -442,10 +440,6 @@ The notebook page is responsive: shadcn `Tabs` switch between sources and chat b
 
 **Still open:** `app/dashboard/page.tsx` (408 lines) has not been through the same pass, and `document-preview.tsx` reflows but its long text column is untuned for a narrow screen.
 
-### 9.2 🟠 No optimistic UI
-
-`handleSubmit` (`notebook-chat.tsx:145`) awaits the Convex `addMessage` round-trip before the user's own message appears. Their text vanishes from the input and nothing shows for ~200ms. Use Convex optimistic updates.
-
 ### 9.3 🟠 No resizable panels
 
 The 40/60 split is fixed with a hard `max-w-[480px]`. Users reading a document alongside chat will want to drag. `react-resizable-panels` + persist to `localStorage`.
@@ -459,10 +453,6 @@ Every icon-only control has an accessible name, both dropzones have a keyboard p
 - **`document-preview.tsx` traps nothing.** It is a hand-rolled overlay with `role="dialog"` / `aria-modal` and its own Escape and backdrop handlers; focus stays behind it and is not restored on close. Replacing it with `components/ui/dialog.tsx` fixes that *and* deletes both handlers — the right fix, and larger than a label.
 - **Nothing has been run through `axe`**, and none of this was checked with a screen reader or by tabbing the app in a browser. The fixes were written by reading.
 
-### 9.5 🟡 Errors surface as raw strings
-
-Chat failures get written into the conversation as `"Sorry, I encountered an error: <raw message>"` (`notebook-chat.tsx:196`) — and persisted to the database, so they pollute history forever. Show a transient toast + inline retry button instead of writing errors to the messages table.
-
 ### 9.6 🟡 Missing basics
 
 No empty states for a notebook with zero sources beyond the dropzone; no per-source processing status (a doc that failed extraction looks identical to a good one); no way to rename a document; no search/filter over sources; no way to see *why* a source has no content.
@@ -473,10 +463,9 @@ No empty states for a notebook with zero sources beyond the dropzone; no per-sou
 
 | Missing | Recommendation |
 |---|---|
-| **Tests** (2 files) | `lib/qdrant.test.ts` (page-number attribution) and `lib/file-type.test.ts` (magic-byte sniffing) run under `bun test` — no runner config needed, so no Vitest dependency is warranted. Extend to the remaining `lib/` pure functions (chunk offsets, model validation). Playwright for the upload → chat → citation flow. |
+| **Tests** (7 files, 37 cases) | `qdrant` (page-number attribution), `file-type` (magic-byte sniffing), `rate-limit` (window maths), `embeddings` (retry predicate), `openrouter` (catalogue filter) and `tts-chunks` (narration splitting) run under `bun test` — no runner config needed, so no Vitest dependency is warranted. Extend to the remaining `lib/` pure functions (chunk offsets, model validation). Playwright for the upload → chat → citation flow. |
 | **CI** | `.github/workflows/ci.yml` runs `tsc --noEmit`, `eslint` and `bun test` on push and PR. **`next build` is not in it** — prerendering `/_not-found` needs a real `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`; add it as a repo secret and a build step once one exists. |
 | **`prettier`** | Not installed; formatting drifts (`lib/openrouter.ts` uses trailing commas, `lib/qdrant.ts` doesn't). Add + `--check` in CI. |
-| **Env validation** | Add `@t3-oss/env-nextjs` + zod so a missing key fails at boot, not at 2am in a route handler. |
 | **Error tracking** | Sentry — you currently have zero visibility into production failures. |
 | **LLM observability** | Helicone or Langfuse — you have no idea what models cost, which fail, or what latency users see. Critical for a multi-model app. |
 | **Webhook replay/idempotency** | `convex/http.ts` handles Clerk retries safely today (upsert + delete are both idempotent), but nothing records `svix-id`, so a replayed *old* event can overwrite a newer profile. Store seen ids with a TTL if profile drift shows up. |
@@ -484,7 +473,7 @@ No empty states for a notebook with zero sources beyond the dropzone; no per-sou
 | **Dependabot / Renovate** | This report exists because nothing watched dependencies for 6 months. Automate it. |
 | **`SECURITY.md`** | Public repo (there's a GitHub link in the navbar) with no disclosure path. |
 
-Also: the README claims **"20+ top-tier AI models"** — true again now that the catalogue is live (§5.6), but it doesn't mention Qdrant, Gemini embeddings, ElevenLabs, or Tavily/Serper at all, despite all four being required for the advertised features.
+The README's **"20+ top-tier AI models"** claim is true again now the catalogue is live (§5.6), and it now names Qdrant, Gemini embeddings, ElevenLabs and Tavily/Serper.
 
 ---
 
@@ -494,9 +483,7 @@ Also: the README claims **"20+ top-tier AI models"** — true again now that the
 
 | Feature | Why | Effort |
 |---|---|---|
-| **Streaming responses** | Removes the worst UX wart; standard expectation | M |
-| **Persist audio overviews** | Feature currently loses its output (§4.2) | M |
-| **Full-length TTS, optionally two-voice** | The "audio overview" pitch, actually delivered. The narration is single-voice and coherent now; what is missing is the other half of a long script (§4.3) | M |
+| **Two-voice narration** | The narration is single-voice, coherent and full-length now. Two voices means one TTS call per speaker turn with alternating voice ids — `lib/tts-chunks.ts` already does the chunk-and-concatenate half | M |
 | **Real PDF viewer for citations** | You render `content.slice()` as plain text; show the actual PDF page with a highlight overlay (`react-pdf`) | M |
 | **Notes / saved answers** | The removed canvas left Tiptap in `package.json` — either bring it back as "Notes" (pin AI answers, edit, export) or delete the deps. Pick one. | M |
 | **Document processing status** | Per-source `pending / processing / ready / failed` with a retry action. The fake "Reprocess Document" button is gone; there is now nothing at all for a source that failed extraction | S |
@@ -539,7 +526,7 @@ Every item below has a **"Done when"** criterion. If you can't demonstrate the c
 | # | Task | § | Done when |
 |---|---|---|---|
 | 1b | **← START HERE.** Set `CLERK_JWT_ISSUER_DOMAIN` on the Convex deployment, then sign in and confirm identity resolves | §3.1 | A temporary query logging `await ctx.auth.getUserIdentity()` returns non-null; create a notebook, upload a doc, chat, delete — all work |
-| 4b | Per-user storage quota + notebook cap | §3.5 | Unlimited notebooks × 50 sources is no longer unbounded paid storage |
+| 4b | Per-user storage quota in *bytes* (the notebook cap itself is done) | §3.5 | A summed-bytes ceiling exists, so 25 notebooks × 50 sources × 10 MB is no longer the only limit |
 
 **Phase 0 exit gate:** you can hand the public Convex URL to a stranger and lose nothing. **Code says yes; nothing has proven it.** Item 1b is the proof.
 
@@ -548,11 +535,8 @@ Every item below has a **"Done when"** criterion. If you can't demonstrate the c
 | # | Task | § | Done when |
 |---|---|---|---|
 | 8 | Confirm the new embedding pipeline writes vectors, and re-index pre-swap sources (the migration itself is done) | §5.1 | A fresh upload produces a non-zero point count in `docsy_documents_v2`, and a question about that document returns a citation from it |
-| 10b | Make the vector purge durable — retry a failed `purgeVectors` | §4.1 | Qdrant being down during a delete no longer orphans vectors permanently |
-| 11 | Make audio generation async via the status field (persistence is done) | §4.2 | The request returns immediately; the live query drives the UI from `pending` → `ready`. **Unblocks item 11b** |
-| 11b | Chunk the podcast script so the whole thing is narrated | §4.3 | A `"long"` overview's audio runs the full script, not the first 5,000 chars |
+| 11 | Decide whether an aborted generation needs recovering — Convex action or cron sweep (the async status flow itself is done) | §4.2 | Closing the tab mid-generation no longer leaves work unfinished, rather than merely unblocked |
 | 12 | Delete the full-document fallback (history is already bounded) | §4.6 | With embeddings disabled, chat says the answer is not in your sources rather than inventing one from raw text |
-| 13 | Env validation + honest README (`.env.example` itself is done) | §10 | A *missing* required var fails at startup with a named error, not a silent demo response |
 
 **Phase 1 exit gate:** no silent failure modes left — every broken thing announces itself.
 
@@ -561,7 +545,6 @@ Every item below has a **"Done when"** criterion. If you can't demonstrate the c
 The remaining phases are lower-risk and less order-dependent, so they're listed without individual gates.
 
 ### Phase 2 — Quality (weeks 4–6)
-14. Streaming chat via the AI SDK — **§8**
 17. Split `sources-panel.tsx` — **§6.2**
 19. Extend `bun test` coverage + Playwright (CI itself is done) — **§10**
 20. Sentry + Helicone/Langfuse — **§10**
@@ -582,8 +565,6 @@ All dependencies are on latest as of 2026-07-27 except the three in §5.7, which
 
 ```bash
 # Add — infrastructure
-bun add ai @ai-sdk/openai-compatible        # streaming
-bun add @t3-oss/env-nextjs zod              # env validation
 bun add @sentry/nextjs                      # error tracking
 bun add react-resizable-panels              # UX
 bun add -d @playwright/test prettier          # `bun test` covers unit tests already

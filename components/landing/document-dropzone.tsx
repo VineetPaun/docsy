@@ -6,6 +6,7 @@ import { useMutation } from "convex/react";
 import { useUser } from "@clerk/nextjs";
 import { api } from "@/convex/_generated/api";
 import { cn } from "@/lib/utils";
+import { convexErrorMessage } from "@/lib/convex-error";
 
 const ACCEPTED_TYPES = {
   "application/pdf": "pdf",
@@ -125,10 +126,15 @@ export function DocumentDropzone() {
       setStatus("Done! Redirecting...");
       router.push(`/notebook/${notebookId}`);
     } catch (error) {
+      // A ConvexError (notebook cap, source cap) carries its message on `.data`;
+      // `error.message` there is the wrapped "Uncaught ConvexError" noise.
       setStatus(
-        error instanceof Error && error.message
-          ? error.message
-          : "Something went wrong. Please try again."
+        convexErrorMessage(
+          error,
+          error instanceof Error && error.message
+            ? error.message
+            : "Something went wrong. Please try again."
+        )
       );
       setIsProcessing(false);
     }

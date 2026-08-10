@@ -1,7 +1,16 @@
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { getUser, requireOwnedNotebook, requireUser } from "./lib/auth";
 import { purgeNotebook } from "./lib/cascade";
+
+// Documents cap at 50 per notebook (documents.ts), which bounds one notebook
+// and nothing else: unlimited notebooks × 50 sources is still unbounded paid
+// storage, embeddings and retrieval. AUDIT.md §3.5.
+//
+// ponytail: a count cap, not a summed-bytes quota. Bytes need a schema column
+// maintained on every upload and delete; add that if an account ever gets close
+// enough to this ceiling for the difference to cost real money.
+const MAX_NOTEBOOKS_PER_USER = 25;
 
 // Get all notebooks for the signed-in user
 export const getNotebooks = query({
@@ -49,6 +58,19 @@ export const createNotebook = mutation({
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
+
+    // Enforced here rather than in the UI: this mutation is a public HTTP
+    // endpoint, so a client-side check is decoration.
+    const existing = await ctx.db
+      .query("notebooks")
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .collect();
+
+    if (existing.length >= MAX_NOTEBOOKS_PER_USER) {
+      throw new ConvexError(
+        `You already have ${MAX_NOTEBOOKS_PER_USER} notebooks, the maximum. Delete one to create another.`
+      );
+    }
 
     const notebookId = await ctx.db.insert("notebooks", {
       userId: user._id,

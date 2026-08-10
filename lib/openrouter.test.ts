@@ -5,7 +5,7 @@
  */
 
 import { expect, test } from "bun:test";
-import { isOfferedModel, toModelInfo } from "./openrouter";
+import { isOfferedModel, parseStreamLine, toModelInfo } from "./openrouter";
 
 const freeModel = {
   id: "google/gemma-4-31b-it:free",
@@ -70,4 +70,47 @@ test("maps an unknown vendor to the 'other' provider", () => {
 
 test("labels an allowlisted paid model premium", () => {
   expect(toModelInfo(paidAllowlisted).tier).toBe("premium");
+});
+
+/**
+ * SSE line parsing for streamed completions (AUDIT.md §8).
+ *
+ * The stream is parsed by hand rather than with the Vercel AI SDK, so the line
+ * handling is ours to get right — and a parser that silently drops deltas looks
+ * identical to a slow model.
+ */
+
+test("extracts the delta text from a content chunk", () => {
+  const line = `data: ${JSON.stringify({
+    choices: [{ delta: { content: "Hello" } }],
+  })}`;
+  expect(parseStreamLine(line)).toBe("Hello");
+});
+
+test("recognises the terminator", () => {
+  expect(parseStreamLine("data: [DONE]")).toBe("done");
+});
+
+test("skips lines with no usable text", () => {
+  // Keep-alive comment, non-data line, blank line.
+  expect(parseStreamLine(": ping")).toBeNull();
+  expect(parseStreamLine("event: message")).toBeNull();
+  expect(parseStreamLine("")).toBeNull();
+
+  // Role-only opening chunk, and an empty delta.
+  expect(
+    parseStreamLine(`data: ${JSON.stringify({ choices: [{ delta: { role: "assistant" } }] })}`)
+  ).toBeNull();
+  expect(
+    parseStreamLine(`data: ${JSON.stringify({ choices: [{ delta: { content: "" } }] })}`)
+  ).toBeNull();
+});
+
+test("survives malformed JSON instead of throwing", () => {
+  expect(parseStreamLine("data: {not json")).toBeNull();
+});
+
+test("keeps whitespace-only deltas, which carry real spacing", () => {
+  const line = `data: ${JSON.stringify({ choices: [{ delta: { content: " " } }] })}`;
+  expect(parseStreamLine(line)).toBe(" ");
 });

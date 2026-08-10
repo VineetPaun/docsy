@@ -9,6 +9,8 @@ import { CitationTooltip } from "@/components/citation-tooltip";
 import { DEFAULT_MODEL, type ModelId } from "@/lib/openrouter";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { toast } from "sonner";
+import type { Id } from "@/convex/_generated/dataModel";
 
 // Citation interface matching the API response
 export interface Citation {
@@ -60,7 +62,40 @@ export function NotebookChat({
   const dbMessages = useQuery(api.messages.getMessages, {
     notebookId: notebookId as never,
   });
-  const addMessage = useMutation(api.messages.addMessage);
+  /**
+   * The user's own message appears immediately (AUDIT.md §9.2).
+   *
+   * Without this the text left the composer and nothing showed for the length
+   * of the Convex round-trip, which reads as a dropped keystroke. The optimistic
+   * document is thrown away the moment the real one arrives.
+   */
+  const addMessage = useMutation(api.messages.addMessage).withOptimisticUpdate(
+    (localStore, args) => {
+      const existing = localStore.getQuery(api.messages.getMessages, {
+        notebookId: args.notebookId,
+      });
+
+      // `undefined` means the query has not loaded; there is no list to prepend
+      // to, and it will arrive with the message already in it.
+      if (existing === undefined) return;
+
+      localStore.setQuery(
+        api.messages.getMessages,
+        { notebookId: args.notebookId },
+        [
+          ...existing,
+          {
+            // Placeholder identity: this document lives only until the server
+            // echoes the real one back, and nothing reads either field.
+            _id: crypto.randomUUID() as Id<"messages">,
+            _creationTime: Date.now(),
+            userId: "" as Id<"users">,
+            ...args,
+          },
+        ]
+      );
+    }
+  );
 
   // Transform DB messages to include parsed citations
   const messages: Message[] = React.useMemo(() => {
@@ -86,6 +121,23 @@ export function NotebookChat({
 
   const [input, setInput] = React.useState("");
   const [isLoading, setIsLoading] = React.useState(false);
+  // The last failed question, kept in memory so it can be retried without
+  // becoming part of the conversation (AUDIT.md §9.5).
+  const [failure, setFailure] = React.useState<{
+    prompt: string;
+    message: string;
+  } | null>(null);
+  /**
+   * The answer currently being written, token by token (AUDIT.md §8).
+   *
+   * Local, not persisted: the message is written to Convex once, when the stream
+   * finishes. Persisting every token would be a write per token.
+   */
+  const [streaming, setStreaming] = React.useState<{
+    text: string;
+    citations?: Citation[];
+    sources?: string[];
+  } | null>(null);
   const [selectedModel, setSelectedModel] =
     React.useState<ModelId>(DEFAULT_MODEL);
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
@@ -105,19 +157,174 @@ export function NotebookChat({
     localStorage.setItem("docsy-model", model);
   };
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  const scrollToBottom = (smooth = true) => {
+    messagesEndRef.current?.scrollIntoView({
+      behavior: smooth ? "smooth" : "auto",
+    });
   };
 
   React.useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    // Jump rather than glide while tokens arrive: a smooth scroll restarted on
+    // every token never finishes, and the transcript visibly stutters.
+    scrollToBottom(!streaming);
+  }, [messages, failure, streaming]);
 
   // Auto-resize textarea
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value);
     e.target.style.height = "auto";
     e.target.style.height = Math.min(e.target.scrollHeight, 200) + "px";
+  };
+
+  /**
+   * Ask the model and persist its answer.
+   *
+   * Separate from `handleSubmit` so a retry re-runs only this half — the user's
+   * message is already in the database, and posting it again would duplicate it.
+   *
+   * @param userContent the question, which may not be in `messages` yet
+   * @throws whatever the route reported, for the caller to surface
+   */
+  const requestAnswer = async (userContent: string) => {
+    // On a retry `messages` already ends with this question; on a first attempt
+    // it does not (the mutation resolves after this closure was made). Drop only
+    // a trailing duplicate — matching on content anywhere would delete an
+    // earlier, legitimately repeated question from the history.
+    const last = messages[messages.length - 1];
+    const history =
+      last?.role === "user" && last.content === userContent
+        ? messages.slice(0, -1)
+        : messages;
+
+    const response = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messages: [...history, { role: "user", content: userContent }].map(
+          (m) => ({
+            role: m.role,
+            content: m.content,
+          })
+        ),
+        // Ids only — the server reads the text from Convex itself.
+        documentIds: [...selectedDocs],
+        notebookId,
+        notebookTitle,
+        model: selectedModel,
+      }),
+    });
+
+    // Pre-stream failures (503, 403, 429) are still JSON with a real status.
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `API error: ${response.status}`);
+    }
+
+    if (!response.body) {
+      throw new Error("The server sent no response body");
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+
+    let buffer = "";
+    let text = "";
+    let citations: Citation[] | undefined;
+    let sources: string[] | undefined;
+    let streamError: string | null = null;
+
+    setStreaming({ text: "" });
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // Whole lines only: a network chunk can split one in half, and the
+        // remainder waits in the buffer for the rest of it.
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const raw of lines) {
+          if (!raw.trim()) continue;
+
+          let event: {
+            type?: string;
+            text?: string;
+            message?: string;
+            citations?: Citation[];
+            sources?: string[];
+          };
+          try {
+            event = JSON.parse(raw);
+          } catch {
+            continue;
+          }
+
+          if (event.type === "meta") {
+            // Retrieval finished before the first token, so the source header
+            // can render while the answer is still being written.
+            citations = event.citations;
+            sources = event.sources;
+            setStreaming((current) => ({
+              text: current?.text ?? "",
+              citations,
+              sources,
+            }));
+          } else if (event.type === "delta" && event.text) {
+            text += event.text;
+            const snapshot = text;
+            setStreaming((current) => ({ ...current, text: snapshot }));
+          } else if (event.type === "error") {
+            streamError = event.message ?? "Failed to complete the answer";
+          }
+        }
+      }
+    } finally {
+      // Cleared whether the stream finished, failed or was abandoned — a stuck
+      // streaming bubble would sit above the real message forever.
+      setStreaming(null);
+    }
+
+    // A partial answer is deliberately discarded rather than saved: persisting
+    // half a sentence is exactly the history pollution §9.5 removed. The cost
+    // is one retry.
+    if (streamError) {
+      throw new Error(streamError);
+    }
+
+    if (!text.trim()) {
+      throw new Error(
+        "The model returned an empty response. Please try again."
+      );
+    }
+
+    await addMessage({
+      notebookId: notebookId as never,
+      role: "assistant",
+      content: text,
+      timestamp: Date.now(),
+      sources,
+      citations: citations ? JSON.stringify(citations) : undefined,
+    });
+  };
+
+  /**
+   * Surface a failure without writing it to the conversation (AUDIT.md §9.5).
+   *
+   * Failures used to be saved as an assistant message — `"Sorry, I encountered
+   * an error: ..."` — which persisted a transient network problem into the
+   * notebook's history forever, and fed it back to the model as context on
+   * every later question.
+   */
+  const handleFailure = (error: unknown, prompt: string) => {
+    const message =
+      error instanceof Error ? error.message : "Something went wrong";
+
+    setFailure({ prompt, message });
+    toast.error(message);
   };
 
   const handleSubmit = async (e?: React.FormEvent) => {
@@ -131,10 +338,11 @@ export function NotebookChat({
     if (inputRef.current) {
       inputRef.current.style.height = "auto";
     }
+    setFailure(null);
     setIsLoading(true);
 
     try {
-      // Save user message to database
+      // Appears in the transcript immediately — see the optimistic update above.
       await addMessage({
         notebookId: notebookId as never,
         role: "user",
@@ -142,53 +350,53 @@ export function NotebookChat({
         timestamp: userTimestamp,
       });
 
-      // Call the chat API
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: [...messages, { role: "user", content: userContent }].map(
-            (m) => ({
-              role: m.role,
-              content: m.content,
-            }),
-          ),
-          // Ids only — the server reads the text from Convex itself.
-          documentIds: [...selectedDocs],
-          notebookId,
-          notebookTitle,
-          model: selectedModel,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `API error: ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      // Save assistant message to database
-      await addMessage({
-        notebookId: notebookId as never,
-        role: "assistant",
-        content: data.message,
-        timestamp: Date.now(),
-        sources: data.sources,
-        citations: data.citations ? JSON.stringify(data.citations) : undefined,
-      });
+      await requestAnswer(userContent);
     } catch (error) {
-      // Save error message to database
-      await addMessage({
-        notebookId: notebookId as never,
-        role: "assistant",
-        content: `Sorry, I encountered an error: ${error instanceof Error ? error.message : "Unknown error"}. Please try again.`,
-        timestamp: Date.now(),
-      });
+      handleFailure(error, userContent);
     } finally {
       setIsLoading(false);
     }
   };
+
+  /** Re-ask the last failed question. The user's message is already stored. */
+  const handleRetry = async () => {
+    if (!failure || isLoading) return;
+
+    const { prompt } = failure;
+    setFailure(null);
+    setIsLoading(true);
+
+    try {
+      await requestAnswer(prompt);
+    } catch (error) {
+      handleFailure(error, prompt);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  /**
+   * The transcript plus the answer being streamed.
+   *
+   * Appending a synthetic message reuses the existing bubble, markdown renderer
+   * and citation handling rather than duplicating all three for the in-flight
+   * case.
+   */
+  const renderedMessages: Message[] = React.useMemo(() => {
+    if (!streaming) return messages;
+
+    return [
+      ...messages,
+      {
+        id: "streaming",
+        role: "assistant" as const,
+        content: streaming.text,
+        timestamp: Date.now(),
+        sources: streaming.sources,
+        citations: streaming.citations,
+      },
+    ];
+  }, [messages, streaming]);
 
   const suggestedQuestions = [
     "Summarize the main points",
@@ -338,7 +546,7 @@ export function NotebookChat({
           </div>
         ) : (
           <div className="p-4 space-y-6">
-            {messages.map((message) => (
+            {renderedMessages.map((message) => (
               <div
                 key={message.id}
                 className={`flex gap-3 ${message.role === "user" ? "justify-end" : ""}`}
@@ -622,7 +830,7 @@ export function NotebookChat({
                 )}
               </div>
             ))}
-            {isLoading && (
+            {isLoading && !streaming?.text && (
               <div className="flex gap-3">
                 <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10">
                   <svg
@@ -654,6 +862,19 @@ export function NotebookChat({
                     />
                   </div>
                 </div>
+              </div>
+            )}
+            {failure && !isLoading && (
+              <div
+                role="alert"
+                className="flex flex-wrap items-center gap-3 rounded-2xl border border-destructive/30 bg-destructive/5 px-4 py-3"
+              >
+                <p className="min-w-0 flex-1 text-sm text-destructive">
+                  {failure.message}
+                </p>
+                <Button size="sm" variant="outline" onClick={handleRetry}>
+                  Retry
+                </Button>
               </div>
             )}
             <div ref={messagesEndRef} />

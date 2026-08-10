@@ -1,4 +1,5 @@
 import { ConvexError, v } from "convex/values";
+import { internal } from "./_generated/api";
 import { internalAction, mutation, query } from "./_generated/server";
 import {
   getUser,
@@ -229,50 +230,107 @@ export const getStorageUrl = query({
  *
  *   bunx convex env set QDRANT_URL https://...
  *   bunx convex env set QDRANT_API_KEY ...
+ *
+ * A failure reschedules itself (see `PURGE_RETRY_DELAYS_S`). This is safe only
+ * because it is an action: `scheduler.runAfter` inside a *mutation* would be
+ * rolled back by the throw that follows it.
  */
+/**
+ * Retry schedule for a failed purge, in seconds: ~1min, ~5min, ~25min, ~2h.
+ *
+ * `scheduler.runAfter` fires exactly once, so without this a Qdrant outage at
+ * the moment of a delete orphaned the vectors permanently and nothing noticed —
+ * they come back as ghost citations for a document the user deleted
+ * (AUDIT.md §4.1).
+ *
+ * ponytail: retries by rescheduling itself, not via a `vectorPurgeQueue` table
+ * with a cron sweep. The ceiling is that attempts do not survive a deployment
+ * losing its scheduled jobs, and a purge still failing after ~2.5h is given up
+ * on with a log line. Add the table if orphaned vectors ever show up in
+ * practice.
+ */
+const PURGE_RETRY_DELAYS_S = [60, 300, 1_500, 7_200];
+
 export const purgeVectors = internalAction({
   args: {
     documentId: v.optional(v.string()),
     notebookId: v.optional(v.string()),
+    // 0 for the first run. Absent on calls scheduled before this arg existed.
+    attempt: v.optional(v.number()),
   },
-  handler: async (_ctx, args) => {
-    const url = process.env.QDRANT_URL;
-
-    // Throwing puts a named error in the Convex logs. Returning quietly would
-    // reproduce the original bug — vectors silently surviving a delete.
-    if (!url) {
-      throw new Error("QDRANT_URL is not set on the Convex deployment");
-    }
+  handler: async (ctx, args) => {
+    const attempt = args.attempt ?? 0;
 
     // Both keys are indexed payload fields written by `storeChunks`.
     const key = args.documentId ? "documentId" : "notebookId";
     const value = args.documentId ?? args.notebookId;
+
+    // Not retryable — a bad call, not a transient failure.
     if (!value) {
       throw new Error("purgeVectors needs a documentId or a notebookId");
     }
 
+    /**
+     * Reschedule, or give up once the delays run out.
+     *
+     * Throwing puts a named error in the Convex logs either way. Returning
+     * quietly would reproduce the original bug — vectors silently surviving a
+     * delete.
+     */
+    const retry = async (reason: string): Promise<never> => {
+      const delay = PURGE_RETRY_DELAYS_S[attempt];
+
+      if (delay === undefined) {
+        throw new Error(
+          `Qdrant purge for ${key}=${value} gave up after ${attempt} attempts: ${reason}. Vectors are orphaned; purge them by hand.`
+        );
+      }
+
+      await ctx.scheduler.runAfter(delay * 1000, internal.documents.purgeVectors, {
+        ...args,
+        attempt: attempt + 1,
+      });
+
+      throw new Error(
+        `Qdrant purge for ${key}=${value} failed (attempt ${attempt + 1}): ${reason}. Retrying in ${delay}s.`
+      );
+    };
+
+    const url = process.env.QDRANT_URL;
+
+    // Retried rather than thrown outright: the variable is usually missing
+    // because nobody set it, but a retry costs nothing and covers the case
+    // where it is being set right now.
+    if (!url) {
+      return retry("QDRANT_URL is not set on the Convex deployment");
+    }
+
     const apiKey = process.env.QDRANT_API_KEY;
 
-    const response = await fetch(
-      `${url.replace(/\/$/, "")}/collections/${VECTOR_COLLECTION}/points/delete?wait=true`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(apiKey ? { "api-key": apiKey } : {}),
-        },
-        body: JSON.stringify({
-          filter: { must: [{ key, match: { value } }] },
-        }),
-      }
-    );
+    let response: Response;
+    try {
+      response = await fetch(
+        `${url.replace(/\/$/, "")}/collections/${VECTOR_COLLECTION}/points/delete?wait=true`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(apiKey ? { "api-key": apiKey } : {}),
+          },
+          body: JSON.stringify({
+            filter: { must: [{ key, match: { value } }] },
+          }),
+        }
+      );
+    } catch (error) {
+      // Qdrant unreachable — the exact case the retry exists for.
+      return retry(error instanceof Error ? error.message : "network error");
+    }
 
     // A 404 means the collection was never created — nothing to purge, and not
     // a failure worth surfacing.
     if (!response.ok && response.status !== 404) {
-      throw new Error(
-        `Qdrant purge failed for ${key}=${value}: ${response.status} ${await response.text()}`
-      );
+      return retry(`${response.status} ${await response.text()}`);
     }
   },
 });

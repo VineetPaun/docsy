@@ -57,10 +57,12 @@ Bare record of what has been removed, so nobody re-audits it as a fresh finding.
 | 2026-08-03 | §4.2 — the client blocked on the whole generation | Row created `pending` before the call; `/api/audio-overview` patches it through `generating_script` → `synthesizing` → `ready` / `script_only` / `failed` via `progressReporter()` (as the calling user, so `updateAudioOverview` still checks the owner); `sources-panel.tsx` fires the request without awaiting it and derives `isGeneratingAudio` from the row, with a 10-minute staleness cutoff; `audio-player.tsx` no longer renders transport controls around audio that does not exist yet. **Tab-close durability stays as §4.2** |
 | 2026-08-03 | §4.3 — ElevenLabs truncated narration at 5,000 chars | `lib/tts-chunks.ts` — `splitForTts()` splits on sentence boundaries (word boundaries when one sentence is over-long), `concatAudio()` joins the MP3 segments; `/api/audio-overview` makes one sequential request per chunk, capped at `MAX_TTS_CHUNKS = 8`. `audio.truncated` and `estimatedDuration` now describe what was really narrated, and a mid-script TTS failure keeps the audio bought so far. Covered by `lib/tts-chunks.test.ts` |
 | 2026-08-03 | §4.1 — a failed vector purge was never retried | `convex/documents.ts` `purgeVectors` reschedules itself on failure (`PURGE_RETRY_DELAYS_S` — 1min/5min/25min/2h) and gives up with a named log line. Safe only because it is an action; the same code in a mutation would roll the schedule back. **`QDRANT_URL` residual stays as §4.1** |
+| 2026-08-03 | §4.6 — the full-document fallback answered without citations | `/api/chat` — retrieval is the only path from a source to the prompt now. `MAX_FALLBACK_CONTEXT_CHARS` and the raw-text loop are gone; a missing `GOOGLE_API_KEY` / `QDRANT_URL` is a **503 naming it** and a retrieval throw is a 502 ("Could not search your sources"), instead of a silent downgrade to an ungrounded answer. Empty results now say so in the prompt. `notebookId` is required (it was optional, which only produced context-free completions) and the dead `useRAG` flag — no caller ever set it — is deleted. ⚠️ Chat is now unusable without a working Qdrant + embeddings pair; that is the point, but it means §5.1 is no longer optional |
+| 2026-08-03 | ROADMAP §3.4 — uploaded source text was pasted into the system prompt as instructions | `lib/prompt-guard.ts` — `fenceSourceData()` wraps untrusted text in `<source_data>` (stripping the delimiters from the content so a document cannot close the block) and `SOURCE_DATA_RULE` tells the model the block is data, never commands. Applied in `/api/chat`, `/api/audio-overview` and `/api/research` (search snippets are untrusted too). Covered by `lib/prompt-guard.test.ts`. **Structural separation only** — mitigations 2–5 stay open in ROADMAP §3.4 |
 | 2026-08-03 | §10 — `.env.example` did not actually exist | The 2026-07-29 row below was wrong: the file was never written, and `git ls-files` had no trace of it. Now present with all 14 client-side vars, the four Convex-deployment ones, and the silent-failure table |
 | 2026-07-29 | §4.5 — source selection never reached retrieval · §4.7 — full document text posted per chat message | `/api/chat` takes `documentIds` instead of `documents` and loads the text itself via `notebookDocuments()` (`lib/convex-server.ts`); the selection filters both retrieval (`searchChunks({ documentIds })`) and the no-RAG fallback; `selectedDocs` lifted from `sources-panel.tsx` to `app/notebook/[id]/page.tsx` so chat can read it. Empty selection = whole notebook. **`/api/audio-overview` still takes body text — that residual is now §4.7** |
 
-Partial progress on §3.5, §4.6, §4.9, §5.6 and §6.5 is folded into those sections; what remains of §3.2 — the routes authenticate but never check *ownership* — is now §3.6, and is no longer blocked. **§3.1 is now only about moving user provisioning out of the browser into a Clerk webhook** — the data-exposure half is closed, pending the runtime check called out in that section.
+Partial progress on §3.5, §4.9, §5.6 and §6.5 is folded into those sections; what remains of §3.2 — the routes authenticate but never check *ownership* — is now §3.6, and is no longer blocked. **§3.1 is now only about moving user provisioning out of the browser into a Clerk webhook** — the data-exposure half is closed, pending the runtime check called out in that section.
 
 **Verification status:** `bunx tsc --noEmit` passes and `bun run lint` is clean (0 errors, 0 warnings) as of 2026-07-28. `bun run build` compiles + typechecks but cannot *finish* here because prerendering `/_not-found` needs `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and no `.env` exists in this checkout — that is §10, not a code defect. **No runtime behaviour has been exercised**, so treat the §12 acceptance criteria as *not yet demonstrated*.
 
@@ -106,7 +108,7 @@ bun run lint        # eslint
 
 ⚠️ `convex/_generated/` is committed but is **generated output**. Never hand-edit it. If `api.*` references look wrong, run `bunx convex dev` to regenerate rather than editing the files.
 
-⚠️ `bun test` runs the one test file that exists, `lib/qdrant.test.ts`. There is no broader suite (§10) — never report that "tests pass" as evidence a feature works.
+⚠️ `bun test` runs 40 cases across 8 files, all over pure functions in `lib/`. There is no integration or E2E suite (§10) — never report that "tests pass" as evidence a feature works.
 
 ### 0.4 Confidence levels — what to trust
 
@@ -139,7 +141,7 @@ The README documents 5 of these. `.env.example` now carries the full list with i
 | `SERPER_API_KEY` | `api/web-search/route.ts:29` | Web search | Fallback |
 | `NEXT_PUBLIC_APP_URL` | `lib/openrouter.ts` | OpenRouter attribution | Defaults to `localhost:3000` |
 
-**Degradation behaviour worth knowing:** the three routes that used to fabricate "demo" output now 503 and name the missing variable, so a misconfigured chat, web search or research call says so. The quieter ones remain: no `ELEVENLABS_API_KEY` yields a script with no audio, and no `QDRANT_URL` / embeddings key means retrieval finds nothing and `/api/chat` answers from raw document text instead (§4.6). This is why §0.3 verification matters.
+**Degradation behaviour worth knowing:** the three routes that used to fabricate "demo" output now 503 and name the missing variable, so a misconfigured chat, web search or research call says so. `/api/chat` joined them: without `QDRANT_URL` or an embeddings key it 503s naming the variable, because the raw-text fallback that used to cover for them is gone. One quiet one remains: no `ELEVENLABS_API_KEY` yields a script with no audio. This is why §0.3 verification matters.
 
 ### 0.6 How to navigate this report
 
@@ -173,7 +175,7 @@ The problem is that it was built fast and never hardened. At the time of the aud
 | Dependency health | **B** | Deprecated Google SDK replaced; 3 packages pinned back on upstream blockers (§5.7) |
 | RAG quality | **C** | Works, but naive — no reranking, no hybrid, top-5 fixed |
 | Code quality | **B−** | 1200-line god component remains; `console.*` and `any` now effectively zero |
-| Testing / CI | **D+** | 7 unit test files + CI on push/PR; no integration or E2E coverage |
+| Testing / CI | **D+** | 8 unit test files + CI on push/PR; no integration or E2E coverage |
 | Performance / cost | **C** | Rate limits, bounded payloads, streamed answers and optimistic sends; no caching, and `.collect()` + JS sort is still everywhere (§8) |
 | Mobile / a11y | **C** | Notebook page is responsive now; dashboard is not. Accessible names, keyboard paths and reduced-motion are in; focus management and any real audit are not (§9.4) |
 
@@ -181,7 +183,7 @@ The problem is that it was built fast and never hardened. At the time of the aud
 
 1. **Set the four Convex-side env vars and confirm `ctx.auth.getUserIdentity()` is non-null** (§3.1). Everything below assumes this, and nothing works without it
 2. **Register the Clerk webhook** — until it exists, no `users` row is ever created and new signups cannot use the app (§3.1)
-3. **Confirm embeddings actually produce vectors** in `docsy_documents_v2` after the SDK swap, and re-upload anything indexed before it (§5.1). Until that is checked, chat quietly answers from raw text (§4.6)
+3. **Confirm embeddings actually produce vectors** in `docsy_documents_v2` after the SDK swap, and re-upload anything indexed before it (§5.1). The raw-text fallback is gone, so a dead pipeline now means every answer is "not in your sources" — loud, but it makes this item blocking rather than optional
 
 ---
 
@@ -296,14 +298,6 @@ The client no longer waits: it creates the row as `pending`, fires the request w
 
 **Fix, if strandings show up in practice:** run generation in a Convex action (durable, survives the client entirely) or sweep non-terminal rows on a cron. Neither is worth building before there is evidence the abort actually happens to real users. ⚠️ The action route is not a lift-and-shift: `resolveModel()` leans on Next's fetch cache, which does not exist in the Convex runtime.
 
-### 4.6 🟠 Full-document fallback still stuffs the prompt
-
-The overflow itself is closed: `/api/chat` now trims history to the last 20 messages / 24k chars (`trimHistory`) and caps the no-RAG fallback at `MAX_FALLBACK_CONTEXT_CHARS` (30k), so neither can grow without bound. The client still posts its whole history, but the server no longer forwards it.
-
-What remains is the fallback's *existence*. When retrieval returns nothing — no vectors yet, or nothing cleared the score floor — the route silently swaps in raw document text instead of admitting RAG found nothing. That masks a dead embedding pipeline (§5.1) as a working one, and the answers it produces carry no citations.
-
-**Fix:** delete the fallback and say "not in your sources" instead. Do it once §5.1 is confirmed working — until then it is the only thing keeping chat usable on a deployment with no Qdrant.
-
 ### 4.9 🟡 Page numbers: PDFs only
 
 Page numbers now work for PDF uploads — `/api/process-document` joins `result.pages` with `\f` and the existing form-feed detection in `chunkTextWithPositions` does the rest (covered by `lib/qdrant.test.ts`).
@@ -333,7 +327,7 @@ Nothing writes them any more — `updateNotebook` no longer accepts `canvasConte
 **What remains, and it is not small:**
 
 - **The new vector space is a different space.** `lib/qdrant.ts` writes to `docsy_documents_v2` for that reason (and `convex/documents.ts` purges from the same name — the two constants must stay in step). **Every source indexed before this change has no vectors in the new collection**, so those notebooks retrieve nothing until they are re-uploaded. Delete the old collection from Qdrant once you accept that.
-- **Nothing has confirmed the pipeline actually returns vectors.** Upload a fresh document and check the point count in `docsy_documents_v2` directly — not the chat output, which has a fallback (§4.6) that hides an empty index.
+- **Nothing has confirmed the pipeline actually returns vectors.** Upload a fresh document and check the point count in `docsy_documents_v2` directly. The fallback that used to hide an empty index is deleted, so chat will now say "not in your sources" for everything if this is broken — which is a symptom, not a diagnosis. Check Qdrant.
 
 ### 5.3 🟠 Two overlapping UI primitive libraries
 
@@ -463,7 +457,7 @@ No empty states for a notebook with zero sources beyond the dropzone; no per-sou
 
 | Missing | Recommendation |
 |---|---|
-| **Tests** (7 files, 37 cases) | `qdrant` (page-number attribution), `file-type` (magic-byte sniffing), `rate-limit` (window maths), `embeddings` (retry predicate), `openrouter` (catalogue filter) and `tts-chunks` (narration splitting) run under `bun test` — no runner config needed, so no Vitest dependency is warranted. Extend to the remaining `lib/` pure functions (chunk offsets, model validation). Playwright for the upload → chat → citation flow. |
+| **Tests** (8 files, 40 cases) | `qdrant` (page-number attribution), `file-type` (magic-byte sniffing), `rate-limit` (window maths), `embeddings` (retry predicate), `openrouter` (catalogue filter), `tts-chunks` (narration splitting), `env` (boot-required vars) and `prompt-guard` (source fencing) run under `bun test` — no runner config needed, so no Vitest dependency is warranted. Extend to the remaining `lib/` pure functions (chunk offsets, model validation). Playwright for the upload → chat → citation flow. |
 | **CI** | `.github/workflows/ci.yml` runs `tsc --noEmit`, `eslint` and `bun test` on push and PR. **`next build` is not in it** — prerendering `/_not-found` needs a real `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`; add it as a repo secret and a build step once one exists. |
 | **`prettier`** | Not installed; formatting drifts (`lib/openrouter.ts` uses trailing commas, `lib/qdrant.ts` doesn't). Add + `--check` in CI. |
 | **Error tracking** | Sentry — you currently have zero visibility into production failures. |
@@ -536,7 +530,6 @@ Every item below has a **"Done when"** criterion. If you can't demonstrate the c
 |---|---|---|---|
 | 8 | Confirm the new embedding pipeline writes vectors, and re-index pre-swap sources (the migration itself is done) | §5.1 | A fresh upload produces a non-zero point count in `docsy_documents_v2`, and a question about that document returns a citation from it |
 | 11 | Decide whether an aborted generation needs recovering — Convex action or cron sweep (the async status flow itself is done) | §4.2 | Closing the tab mid-generation no longer leaves work unfinished, rather than merely unblocked |
-| 12 | Delete the full-document fallback (history is already bounded) | §4.6 | With embeddings disabled, chat says the answer is not in your sources rather than inventing one from raw text |
 
 **Phase 1 exit gate:** no silent failure modes left — every broken thing announces itself.
 

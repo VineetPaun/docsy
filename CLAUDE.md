@@ -40,7 +40,7 @@ bun run lint         # eslint
 
 CI (`.github/workflows/ci.yml`) runs `tsc --noEmit`, `eslint` and `bun test` on push and PR — not `next build`, which needs a real Clerk key.
 
-`bun test` runs the seven test files that exist (`lib/qdrant.test.ts` — page-number attribution; `lib/file-type.test.ts` — magic-byte sniffing; `lib/rate-limit.test.ts` — fixed-window maths; `lib/embeddings.test.ts` — retry predicate; `lib/openrouter.test.ts` — model catalogue filter; `lib/tts-chunks.test.ts` — narration splitting; `lib/env.test.ts` — the boot-required env check). There is **no broader suite**, so passing tests are never evidence a feature works end-to-end.
+`bun test` runs the eight test files that exist (`lib/qdrant.test.ts` — page-number attribution; `lib/file-type.test.ts` — magic-byte sniffing; `lib/rate-limit.test.ts` — fixed-window maths; `lib/embeddings.test.ts` — retry predicate; `lib/openrouter.test.ts` — model catalogue filter; `lib/tts-chunks.test.ts` — narration splitting; `lib/env.test.ts` — the boot-required env check; `lib/prompt-guard.test.ts` — a document cannot escape the source fence). There is **no broader suite**, so passing tests are never evidence a feature works end-to-end.
 
 ## ⚠️ Read before writing code
 
@@ -50,7 +50,7 @@ These are the traps that cause agents to do the wrong thing here.
 
 ⚠️ **The whole thing hangs on `CLERK_JWT_ISSUER_DOMAIN` being set on the *Convex deployment*** (`bunx convex env set …`, not `.env.local`). Missing → `ctx.auth.getUserIdentity()` is null for every request → every query returns empty and every mutation throws `Unauthenticated`. If the app looks logged-out while Clerk clearly has a session, check that first. `AUDIT.md` §3.1.
 
-**2. Missing env vars fail quietly, in different ways.** `/api/chat`, `/api/web-search` and `/api/research` now return **503 naming the variable** — the fabricated "demo" responses are gone. The rest still degrade silently: no `ELEVENLABS_API_KEY` gives a script with no audio, and no Qdrant/embeddings key means retrieval returns nothing and chat answers from raw document text with no citations (`AUDIT.md` §4.6). Copy `.env.example` → `.env.local`; it lists every var and what breaks without it. `AUDIT.md` §0.5 records where each one is read.
+**2. Missing env vars fail quietly, in different ways.** `/api/chat`, `/api/web-search` and `/api/research` now return **503 naming the variable** — the fabricated "demo" responses are gone. `/api/chat` joined them — no `QDRANT_URL` or embeddings key is a 503 too, since the raw-text fallback that covered for them is gone, so **chat does not work at all without a live Qdrant**. One still degrades silently: no `ELEVENLABS_API_KEY` gives a script with no audio. Copy `.env.example` → `.env.local`; it lists every var and what breaks without it. `AUDIT.md` §0.5 records where each one is read.
 
 **3. `proxy.ts` is the middleware.** Next 16 renamed `middleware.ts` → `proxy.ts`. Don't create `middleware.ts`; it won't run. It now protects every route except the landing page and the Clerk auth pages, and returns a JSON 401 (not a redirect) for `/api/*`.
 
@@ -116,6 +116,9 @@ lib/
   url-guard.ts          SSRF-safe fetch for user-supplied URLs
   file-type.ts          sniffFileType() — magic bytes decide an upload's type;
                         file.type is never trusted
+  prompt-guard.ts       fenceSourceData() / SOURCE_DATA_RULE — source text and
+                        web snippets are untrusted; they go in a <source_data>
+                        block, never straight into a prompt (ROADMAP §3.4)
   tts-chunks.ts         splitForTts() / concatAudio() — narration is split into
                         ≤5,000-char ElevenLabs requests and the MP3s joined, so
                         a long script is narrated in full

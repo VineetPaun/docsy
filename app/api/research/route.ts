@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { chatWithOpenRouter, resolveModel, type ModelId } from "@/lib/openrouter";
 import { requireApiAuth } from "@/lib/api-auth";
 import { enforceRateLimit } from "@/lib/rate-limit";
+import { fenceSourceData, SOURCE_DATA_RULE } from "@/lib/prompt-guard";
 
 interface ResearchRequest {
   topic: string;
@@ -161,11 +162,15 @@ async function synthesizeReport(
   depth: string,
   model: ModelId
 ): Promise<string> {
+  // Search snippets are somebody else's HTML — fenced and labelled as data,
+  // same as uploaded sources (ROADMAP.md §3.4).
   const sourceContext =
     sources.length > 0
-      ? sources
-          .map((s, i) => `[${i + 1}] ${s.title}\n${s.snippet}`)
-          .join("\n\n")
+      ? fenceSourceData(
+          sources
+            .map((s, i) => `[${i + 1}] ${s.title}\n${s.snippet}`)
+            .join("\n\n")
+        )
       : "No web sources available.";
 
   const lengthGuide =
@@ -186,7 +191,9 @@ Use markdown formatting with:
 - Bullet points for key findings
 - Citations using [1], [2], etc. when referencing sources
 
-Be objective and thorough.`,
+Be objective and thorough.
+
+${SOURCE_DATA_RULE}`,
       },
       {
         role: "user",

@@ -13,6 +13,9 @@
     "isolatedModules": true,
     "jsx": "react-jsx",
     "incremental": true,
+    // TypeScript 7 no longer auto-includes every @types package, so the ambient
+    // globals this project relies on (process, bun:test) must be listed.
+    "types": ["node", "bun"],
     "plugins": [
       {
         "name": "next"

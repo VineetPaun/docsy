@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { SignedIn, SignedOut } from "@clerk/nextjs";
+// Clerk 7 replaced <SignedIn>/<SignedOut> with a single <Show when="…"> control.
+import { Show } from "@clerk/nextjs";
 
 export function CTA() {
   return (
@@ -23,7 +24,7 @@ export function CTA() {
               save hours every week with Docsy.
             </p>
             <div className="mt-8 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
-              <SignedOut>
+              <Show when="signed-out">
                 <Button size="lg" asChild className="h-12 px-8 text-base">
                   <Link href="/sign-up">
                     Start for free
@@ -42,8 +43,8 @@ export function CTA() {
                     </svg>
                   </Link>
                 </Button>
-              </SignedOut>
-              <SignedIn>
+              </Show>
+              <Show when="signed-in">
                 <Button size="lg" asChild className="h-12 px-8 text-base">
                   <Link href="/dashboard">
                     Go to Dashboard
@@ -62,7 +63,7 @@ export function CTA() {
                     </svg>
                   </Link>
                 </Button>
-              </SignedIn>
+              </Show>
               <p className="text-sm text-muted-foreground">
                 No credit card required
               </p>

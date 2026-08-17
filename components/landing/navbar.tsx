@@ -1,6 +1,7 @@
 "use client";
 
-import { SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
+// Clerk 7 replaced <SignedIn>/<SignedOut> with a single <Show when="…"> control.
+import { Show, UserButton } from "@clerk/nextjs";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -69,7 +70,7 @@ export function Navbar() {
             </Link>
           </Button>
           <ThemeToggle />
-          <SignedOut>
+          <Show when="signed-out">
             <Button
               variant="ghost"
               size="sm"
@@ -81,10 +82,10 @@ export function Navbar() {
             <Button size="sm" asChild>
               <Link href="/sign-up">Get Started</Link>
             </Button>
-          </SignedOut>
-          <SignedIn>
+          </Show>
+          <Show when="signed-in">
             <UserButton />
-          </SignedIn>
+          </Show>
         </div>
       </div>
     </header>

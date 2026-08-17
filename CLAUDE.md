@@ -34,11 +34,11 @@ A NotebookLM-style RAG app. A user creates a **notebook**, adds **sources** (PDF
 bun install
 bunx convex dev      # terminal 1 — backend + codegen. Required; app is non-functional without it
 bun dev              # terminal 2 — Next.js on :3000
-bunx tsc --noEmit    # typecheck
-bun run lint         # eslint
+bunx tsc --noEmit    # typecheck (TypeScript 7 native compiler)
+bun run lint         # ⚠️ CURRENTLY CRASHES — see trap #8
 ```
 
-CI (`.github/workflows/ci.yml`) runs `tsc --noEmit`, `eslint` and `bun test` on push and PR — not `next build`, which needs a real Clerk key.
+CI (`.github/workflows/ci.yml`) runs `tsc --noEmit`, `eslint` and `bun test` on push and PR — not `next build`, which needs a real Clerk key. **The `eslint` step is red on every push** until trap #8 is resolved; `tsc` and `bun test` are the signal.
 
 `bun test` runs the eight test files that exist (`lib/qdrant.test.ts` — page-number attribution; `lib/file-type.test.ts` — magic-byte sniffing; `lib/rate-limit.test.ts` — fixed-window maths; `lib/embeddings.test.ts` — retry predicate; `lib/openrouter.test.ts` — model catalogue filter; `lib/tts-chunks.test.ts` — narration splitting; `lib/env.test.ts` — the boot-required env check; `lib/prompt-guard.test.ts` — a document cannot escape the source fence). There is **no broader suite**, so passing tests are never evidence a feature works end-to-end.
 
@@ -71,6 +71,10 @@ These are the traps that cause agents to do the wrong thing here.
 **6. `convex/` is fully typed now — keep it that way.** The `/* eslint-disable no-explicit-any */` headers and `ctx: any, args: any` annotations are gone; Convex infers both from the `args:` validators. Don't reintroduce `any` to silence an error.
 
 **7. Formatting is inconsistent** (no Prettier installed — some files use trailing commas, some don't). Match the file you're editing. Don't reformat whole files; it buries real changes in diff noise.
+
+**8. `bun run lint` crashes, on purpose — don't "fix" it by downgrading TypeScript.** `typescript@7` is the native compiler and ships **no JS compiler API** (`typescript/lib/typescript.js` is gone; the package's only root export is a version stub). `typescript-eslint@8`, which `eslint-config-next` pulls in, `require()`s that API, so eslint dies before linting a single file with `TypeError: Cannot read properties of undefined (reading 'Cjs')`. There is no released typescript-eslint that supports TS 7 — this is upstream, not a misconfiguration, and it was accepted knowingly when TS 7 landed. Re-check `typescript-eslint`'s `typescript` peer range (`>=4.8.4 <6.1.0` as of the upgrade) before trying again. Two related consequences:
+- **eslint must stay on 9.x.** eslint 10 removed the internal `FlatESLint` that `@typescript-eslint/utils` extends → `TypeError: Class extends value undefined`. Independent of the TS 7 problem; both must clear before either bump.
+- **`next build` needs `experimental.useTypeScriptCli: true`** (already set in `next.config.ts`). Next can't use the missing compiler API, so it spawns the `tsc` CLI instead. Remove that flag and the build throws `TypeScript 7.0.2 does not provide the compiler API required by Next.js`.
 
 ## Layout
 
@@ -149,7 +153,7 @@ lib/
 
 ## Before you claim something works
 
-- `bunx tsc --noEmit` and `bun run lint` both clean
+- `bunx tsc --noEmit` clean and `bun test` green. `bun run lint` cannot pass right now (trap #8) — don't treat its crash as your regression, and don't count it as evidence either way
 - If you touched retrieval, ingestion, or prompts, verify end-to-end with a real upload — unit-level correctness means little here, and AI failures are silent
 - Don't assert runtime behaviour you didn't execute. `node_modules` may not even be installed
 

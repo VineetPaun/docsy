@@ -13,9 +13,10 @@ export default function SSOCallbackPage() {
   React.useEffect(() => {
     const handleCallback = async () => {
       try {
+        // Clerk 7 dropped afterSign*Url in favour of the fallback redirect props.
         await handleRedirectCallback({
-          afterSignInUrl: "/dashboard",
-          afterSignUpUrl: "/dashboard",
+          signInFallbackRedirectUrl: "/dashboard",
+          signUpFallbackRedirectUrl: "/dashboard",
         });
       } catch (err: unknown) {
         const error = err as { errors?: { message: string }[] };

@@ -1,7 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { useSignIn } from "@clerk/nextjs";
+// Clerk 7 made the signals API the default `useSignIn`; the resource-based hook
+// this flow is written against now lives on the /legacy entry point.
+import { useSignIn } from "@clerk/nextjs/legacy";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";

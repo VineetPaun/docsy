@@ -138,8 +138,10 @@ export async function searchChunks(
     });
   }
 
-  const results = await client.search(COLLECTION_NAME, {
-    vector: embedding,
+  // qdrant-js 1.19 dropped `search()`; `query()` is the universal replacement and
+  // wraps the hits in a `points` array.
+  const { points } = await client.query(COLLECTION_NAME, {
+    query: embedding,
     filter,
     limit: options?.limit ?? 10,
     // Filtered server-side by Qdrant so weak matches never cross the wire.
@@ -147,7 +149,7 @@ export async function searchChunks(
     with_payload: true,
   });
 
-  return results.map((result) => ({
+  return points.map((result) => ({
     id: result.id as string,
     documentId: result.payload?.documentId as string,
     content: result.payload?.content as string,

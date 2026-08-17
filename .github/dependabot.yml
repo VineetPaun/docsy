@@ -1,0 +1,32 @@
+# Nothing watched this repo's dependencies for six months, which is how it ended
+# up with an abandoned PDF parser, a deprecated embeddings SDK and 16 dead model
+# slugs at once (AUDIT.md §10). Weekly, grouped, so it is one reviewable PR
+# rather than twenty.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Patch and minor bumps are read as one PR; majors arrive individually
+      # because each one here has needed a migration (Clerk 7, TypeScript 7).
+      safe-updates:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # Held deliberately — see CLAUDE.md trap 8. typescript-eslint@8 peer-caps
+      # eslint at ^9 and typescript at <6.1, so bumping either breaks the lint
+      # run rather than fixing it. Drop these entries once Next ships a config
+      # built on typescript-eslint@9.
+      - dependency-name: eslint
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly

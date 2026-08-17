@@ -23,6 +23,55 @@ const RATE_LIMITS = {
 } as const;
 
 /**
+ * How long a delivery id is remembered, and how many stale ones one call
+ * clears. Svix stops retrying long before 24h, so anything older than that
+ * cannot be a retry of live traffic.
+ */
+const WEBHOOK_EVENT_TTL_MS = 24 * HOUR;
+const WEBHOOK_PRUNE_BATCH = 50;
+
+/**
+ * Claim a Svix delivery id, returning false if this event was already applied.
+ *
+ * `upsertFromClerk` and `deleteUser` are individually idempotent, so a retry of
+ * the *latest* event is harmless. What this stops is a replayed **older**
+ * event — Svix redelivering a `user.updated` from an hour ago — overwriting the
+ * profile with stale values (AUDIT.md §10).
+ *
+ * Pruning happens here rather than on a cron: this table is only ever written
+ * from this function, so the write path is the one place guaranteed to run.
+ */
+export const claimWebhookEvent = internalMutation({
+  args: { svixId: v.string() },
+  handler: async (ctx, args) => {
+    const seen = await ctx.db
+      .query("webhookEvents")
+      .withIndex("by_svix_id", (q) => q.eq("svixId", args.svixId))
+      .first();
+
+    if (seen) {
+      return false;
+    }
+
+    const now = Date.now();
+    await ctx.db.insert("webhookEvents", { svixId: args.svixId, seenAt: now });
+
+    // Bounded batch, so a long-neglected table drains over several deliveries
+    // instead of blowing one mutation's read limit.
+    const stale = await ctx.db
+      .query("webhookEvents")
+      .withIndex("by_seen_at", (q) => q.lt("seenAt", now - WEBHOOK_EVENT_TTL_MS))
+      .take(WEBHOOK_PRUNE_BATCH);
+
+    for (const row of stale) {
+      await ctx.db.delete(row._id);
+    }
+
+    return true;
+  },
+});
+
+/**
  * Provision or refresh a user row from a Clerk `user.created` /
  * `user.updated` webhook.
  *

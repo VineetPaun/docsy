@@ -8,6 +8,12 @@ import {
   requireUser,
 } from "./lib/auth";
 import { purgeDocument } from "./lib/cascade";
+import {
+  addStorageBytes,
+  assertStorageHeadroom,
+  documentBytes,
+  measureDocumentBytes,
+} from "./lib/quota";
 
 // Must match COLLECTION_NAME in lib/qdrant.ts — including its version suffix,
 // or deletes purge points from a collection nothing writes to. Duplicated
@@ -34,13 +40,15 @@ export const getDocuments = query({
       return [];
     }
 
-    const documents = await ctx.db
+    // Newest first, ordered by the index rather than collected and sorted in
+    // memory (AUDIT.md §8). Bounded by MAX_DOCUMENTS_PER_NOTEBOOK either way.
+    return await ctx.db
       .query("documents")
-      .withIndex("by_notebook", (q) => q.eq("notebookId", args.notebookId))
+      .withIndex("by_notebook_created", (q) =>
+        q.eq("notebookId", args.notebookId)
+      )
+      .order("desc")
       .collect();
-
-    // Sort by most recently created
-    return documents.sort((a, b) => b.createdAt - a.createdAt);
   },
 });
 
@@ -82,16 +90,23 @@ export const createDocument = mutation({
 
     // The only cap a client cannot skip. The file-count check in the upload UI
     // is cosmetic — this mutation is a public HTTP endpoint. AUDIT.md §3.5.
+    // `take` rather than `collect`: the answer is only "is it full", so there is
+    // no reason to read past the cap.
     const existing = await ctx.db
       .query("documents")
       .withIndex("by_notebook", (q) => q.eq("notebookId", args.notebookId))
-      .collect();
+      .take(MAX_DOCUMENTS_PER_NOTEBOOK);
 
     if (existing.length >= MAX_DOCUMENTS_PER_NOTEBOOK) {
       throw new ConvexError(
         `This notebook already has ${MAX_DOCUMENTS_PER_NOTEBOOK} sources, the maximum.`
       );
     }
+
+    // Size ceiling as well as a count ceiling: 25 notebooks × 50 sources was
+    // still 12.5 GB of paid storage per account.
+    const bytes = await measureDocumentBytes(ctx, args);
+    assertStorageHeadroom(user, bytes);
 
     const documentId = await ctx.db.insert("documents", {
       notebookId: args.notebookId,
@@ -104,8 +119,11 @@ export const createDocument = mutation({
       sourceUrl: args.sourceUrl,
       thumbnailUrl: args.thumbnailUrl,
       metadata: args.metadata,
+      bytes,
       createdAt: Date.now(),
     });
+
+    await addStorageBytes(ctx, user._id, bytes);
 
     // Update notebook's updatedAt
     await ctx.db.patch(args.notebookId, { updatedAt: Date.now() });
@@ -122,9 +140,22 @@ export const updateDocumentContent = mutation({
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
-    await requireOwnedDocument(ctx, user, args.documentId);
+    const document = await requireOwnedDocument(ctx, user, args.documentId);
 
-    await ctx.db.patch(args.documentId, { content: args.content });
+    // Rewriting the text changes what the account is storing, so the quota has
+    // to follow it — otherwise a caller could replace 1 KB of content with 50 MB
+    // for free, as many times as it liked.
+    const delta = args.content.length - (document.content?.length ?? 0);
+    if (delta > 0) {
+      assertStorageHeadroom(user, delta);
+    }
+
+    await ctx.db.patch(args.documentId, {
+      content: args.content,
+      bytes: Math.max(0, documentBytes(document) + delta),
+    });
+
+    await addStorageBytes(ctx, user._id, delta);
   },
 });
 

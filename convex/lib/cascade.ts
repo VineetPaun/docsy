@@ -16,6 +16,7 @@
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
+import { addStorageBytes, documentBytes } from "./quota";
 
 /**
  * Delete a stored file, tolerating one that is already gone.
@@ -47,6 +48,10 @@ export async function purgeDocument(ctx: MutationCtx, doc: Doc<"documents">) {
   await deleteFileIfPresent(ctx, doc.storageId);
   await ctx.db.delete(doc._id);
 
+  // Freeing the bytes is part of freeing the source. Skip it and the account's
+  // quota only ever climbs, so deleting sources would never buy headroom.
+  await addStorageBytes(ctx, doc.userId, -documentBytes(doc));
+
   await ctx.scheduler.runAfter(0, internal.documents.purgeVectors, {
     documentId: doc._id,
   });
@@ -71,6 +76,7 @@ export async function purgeNotebook(
   for (const doc of documents) {
     await deleteFileIfPresent(ctx, doc.storageId);
     await ctx.db.delete(doc._id);
+    await addStorageBytes(ctx, doc.userId, -documentBytes(doc));
   }
 
   const audioOverviews = await ctx.db

@@ -10,6 +10,11 @@ export default defineSchema({
     imageUrl: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
+    // Running total of bytes this account has stored, maintained by
+    // convex/lib/quota.ts on every source create, content update and delete.
+    // Optional because rows created before the quota landed have no total;
+    // treated as 0, so an existing account starts from an undercount.
+    storageBytes: v.optional(v.number()),
   })
     .index("by_clerk_id", ["clerkId"])
     .index("by_email", ["email"]),
@@ -24,7 +29,11 @@ export default defineSchema({
     canvasContent: v.optional(v.string()), // JSON string for editor state
     canvasHtml: v.optional(v.string()), // Rendered HTML for preview
     canvasLastEditedAt: v.optional(v.number()),
-  }).index("by_user", ["userId"]),
+  })
+    .index("by_user", ["userId"])
+    // Dashboard order (most recently updated first), read straight from the
+    // index instead of collecting every notebook and sorting.
+    .index("by_user_updated", ["userId", "updatedAt"]),
 
   documents: defineTable({
     notebookId: v.id("notebooks"),
@@ -39,9 +48,15 @@ export default defineSchema({
     sourceUrl: v.optional(v.string()), // Original URL for web/youtube sources
     thumbnailUrl: v.optional(v.string()), // Thumbnail for YouTube videos
     metadata: v.optional(v.string()), // JSON string for additional metadata (author, duration, etc.)
+    // Stored file size + extracted text length, counted against the account's
+    // quota. Recorded here so a delete can subtract without re-reading the
+    // storage metadata of a file it is about to remove.
+    bytes: v.optional(v.number()),
   })
     .index("by_notebook", ["notebookId"])
-    .index("by_user", ["userId"]),
+    .index("by_user", ["userId"])
+    // Newest-first listing without loading every row and sorting in JS.
+    .index("by_notebook_created", ["notebookId", "createdAt"]),
 
   // Audio overviews for NotebookLM-style podcast generation
   audioOverviews: defineTable({
@@ -83,5 +98,19 @@ export default defineSchema({
     citations: v.optional(v.string()), // JSON string of Citation[]
   })
     .index("by_notebook", ["notebookId"])
-    .index("by_user", ["userId"]),
+    .index("by_user", ["userId"])
+    // Transcript order. Chat history is the fastest-growing table here, so it
+    // is the one that must never be read whole.
+    .index("by_notebook_time", ["notebookId", "timestamp"]),
+
+  // Svix delivery ids already applied, so a redelivered event is acknowledged
+  // instead of re-run (AUDIT.md §10). Upsert and delete are both idempotent on
+  // their own; what this stops is a *replayed old* event overwriting a newer
+  // profile.
+  webhookEvents: defineTable({
+    svixId: v.string(),
+    seenAt: v.number(),
+  })
+    .index("by_svix_id", ["svixId"])
+    .index("by_seen_at", ["seenAt"]),
 });

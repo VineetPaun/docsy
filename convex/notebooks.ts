@@ -21,13 +21,12 @@ export const getNotebooks = query({
       return [];
     }
 
-    const notebooks = await ctx.db
+    // Ordered by the index, not collected and sorted in JS (AUDIT.md §8).
+    return await ctx.db
       .query("notebooks")
-      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .withIndex("by_user_updated", (q) => q.eq("userId", user._id))
+      .order("desc")
       .collect();
-
-    // Sort by most recently updated
-    return notebooks.sort((a, b) => b.updatedAt - a.updatedAt);
   },
 });
 
@@ -64,7 +63,7 @@ export const createNotebook = mutation({
     const existing = await ctx.db
       .query("notebooks")
       .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .collect();
+      .take(MAX_NOTEBOOKS_PER_USER);
 
     if (existing.length >= MAX_NOTEBOOKS_PER_USER) {
       throw new ConvexError(

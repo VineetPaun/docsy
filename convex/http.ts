@@ -46,16 +46,28 @@ const handleClerkWebhook = httpAction(async (ctx, request) => {
 
   // The raw body is what was signed, so it must not be parsed first.
   const payload = await request.text();
+  const svixId = request.headers.get("svix-id") ?? "";
 
   let event: ClerkUserEvent;
   try {
     event = new Webhook(secret).verify(payload, {
-      "svix-id": request.headers.get("svix-id") ?? "",
+      "svix-id": svixId,
       "svix-timestamp": request.headers.get("svix-timestamp") ?? "",
       "svix-signature": request.headers.get("svix-signature") ?? "",
     }) as ClerkUserEvent;
   } catch {
     return new Response("Invalid signature", { status: 400 });
+  }
+
+  // Apply each delivery once. Retries of the newest event are harmless, but a
+  // replayed *older* `user.updated` would write a stale profile over a newer
+  // one (AUDIT.md §10). 200 so Svix stops retrying a duplicate.
+  const claimed = await ctx.runMutation(internal.users.claimWebhookEvent, {
+    svixId,
+  });
+
+  if (!claimed) {
+    return new Response(null, { status: 200 });
   }
 
   switch (event.type) {

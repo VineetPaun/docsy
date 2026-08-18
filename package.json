@@ -6,7 +6,8 @@
     "dev": "bun run --bun next dev",
     "build": "bun run --bun next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "eval": "bun run scripts/eval-retrieval.ts"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.7.1",

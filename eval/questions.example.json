@@ -1,0 +1,18 @@
+[
+  {
+    "question": "Ask something one specific source answers unambiguously.",
+    "expectSources": ["part of that source's name"]
+  },
+  {
+    "question": "Ask something two sources both cover, to see which ranks first.",
+    "expectSources": ["first source", "second source"]
+  },
+  {
+    "question": "Ask for an exact term, product name or ID — dense retrieval is worst at these.",
+    "expectSources": ["the source containing it"]
+  },
+  {
+    "question": "Ask something none of your sources cover; expect a MISS, and check chat says so rather than inventing an answer.",
+    "expectSources": ["nothing-should-match-this"]
+  }
+]

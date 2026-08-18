@@ -1,11 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  modelContextLength,
   resolveModel,
   streamChatWithOpenRouter,
   type ChatMessage,
 } from "@/lib/openrouter";
 import { generateEmbedding } from "@/lib/embeddings";
-import { searchChunks, type SearchResult } from "@/lib/qdrant";
+import {
+  retrievalLimitFor,
+  searchChunks,
+  type SearchResult,
+} from "@/lib/qdrant";
+import { rewriteQuery } from "@/lib/query-rewrite";
 import { requireApiAuth } from "@/lib/api-auth";
 import { notebookDocuments, requireNotebookOwner } from "@/lib/convex-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
@@ -144,9 +150,22 @@ export async function POST(request: NextRequest) {
     let ragResults: SearchResult[] = [];
 
     try {
-      const queryEmbedding = await generateEmbedding(userMessage);
+      // "What about the second one?" embeds as a vector for the words "second
+      // one" — the topic lives in the previous turn, not in the message. The
+      // rewrite resolves it against the conversation, and returns the original
+      // untouched when the question already stands alone (AUDIT.md §7).
+      const searchQuery = await rewriteQuery(
+        userMessage,
+        messages.slice(0, -1),
+        selectedModel
+      );
+
+      const queryEmbedding = await generateEmbedding(searchQuery);
+
+      // Breadth follows the model: 5 chunks was hardcoded regardless of whether
+      // the window was 32K or 262K.
       ragResults = await searchChunks(queryEmbedding, notebookId, {
-        limit: 5,
+        limit: retrievalLimitFor(await modelContextLength(selectedModel)),
         documentIds: selectedIds,
       });
     } catch {

@@ -13,7 +13,12 @@
  */
 
 import { expect, test } from "bun:test";
-import { chunkTextWithPositions } from "./qdrant";
+import {
+  MAX_RETRIEVAL_LIMIT,
+  MIN_RETRIEVAL_LIMIT,
+  chunkTextWithPositions,
+  retrievalLimitFor,
+} from "./qdrant";
 
 const PAGE_LEN = 600;
 const page = (n: number) => String(n).repeat(PAGE_LEN);
@@ -54,4 +59,23 @@ test("text with no page breaks reports no page number", () => {
 
   expect(chunks.length).toBeGreaterThan(0);
   expect(chunks.every((c) => c.pageNumber === undefined)).toBe(true);
+});
+
+/**
+ * Retrieval breadth scales with the model's context window (AUDIT.md §7).
+ *
+ * The clamps are the point: an unclamped `context / 2000` asks a 1M-token model
+ * for 500 chunks, and a catalogue miss (contextLength 0) would ask for none.
+ */
+
+test("scales k with the context window, within bounds", () => {
+  expect(retrievalLimitFor(32_000)).toBe(16);
+  expect(retrievalLimitFor(262_144)).toBe(MAX_RETRIEVAL_LIMIT);
+  expect(retrievalLimitFor(1_000_000)).toBe(MAX_RETRIEVAL_LIMIT);
+});
+
+test("an unknown context window retrieves the floor, not nothing", () => {
+  expect(retrievalLimitFor(0)).toBe(MIN_RETRIEVAL_LIMIT);
+  expect(retrievalLimitFor(Number.NaN)).toBe(MIN_RETRIEVAL_LIMIT);
+  expect(retrievalLimitFor(4_000)).toBe(MIN_RETRIEVAL_LIMIT);
 });

@@ -263,6 +263,18 @@ export async function resolveModel(model?: string): Promise<ModelId> {
 }
 
 /**
+ * The context window of a model, as the live catalogue reports it.
+ *
+ * 0 when the model is unknown or the catalogue is unavailable, which callers
+ * treat as "assume the smallest window" rather than guessing large.
+ */
+export async function modelContextLength(model: ModelId): Promise<number> {
+  const catalogue = await fetchModelCatalogue();
+
+  return catalogue.find((entry) => entry.id === model)?.contextLength ?? 0;
+}
+
+/**
  * Group a catalogue for the picker's provider sidebar.
  *
  * Keyed by the providers actually present, in the order the catalogue lists

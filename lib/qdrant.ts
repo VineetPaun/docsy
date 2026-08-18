@@ -114,6 +114,33 @@ export async function storeChunks(
 // floor here is what stops irrelevant passages appearing as citations.
 export const DEFAULT_SCORE_THRESHOLD = 0.5;
 
+/**
+ * How many chunks to retrieve for a model with this context window (AUDIT.md §7).
+ *
+ * `limit: 5` was hardcoded regardless of the model, which under-uses a 262K
+ * window and is generous for a 32K one. Chunks are ~1,000 characters, so this
+ * spends roughly half a percent of the window per chunk and clamps hard at both
+ * ends: fewer than five leaves obvious answers unretrieved, more than twenty
+ * buries the relevant passage in near-misses (no reranker yet — see §7).
+ *
+ * Exported for `lib/qdrant.test.ts`.
+ */
+export const MIN_RETRIEVAL_LIMIT = 5;
+export const MAX_RETRIEVAL_LIMIT = 20;
+
+export function retrievalLimitFor(contextLength: number): number {
+  if (!Number.isFinite(contextLength) || contextLength <= 0) {
+    return MIN_RETRIEVAL_LIMIT;
+  }
+
+  const affordable = Math.floor(contextLength / 2000);
+
+  return Math.max(
+    MIN_RETRIEVAL_LIMIT,
+    Math.min(MAX_RETRIEVAL_LIMIT, affordable)
+  );
+}
+
 // Search for similar chunks
 export async function searchChunks(
   embedding: number[],

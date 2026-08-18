@@ -7,6 +7,8 @@
 import { expect, test } from "bun:test";
 import {
   DEFAULT_MODEL,
+  getModelsByProvider,
+  providerInfo,
   isOfferedModel,
   parseStreamLine,
   pickDefaultModel,
@@ -68,10 +70,34 @@ test("strips the vendor prefix and summarises for the picker", () => {
   );
 });
 
-test("maps an unknown vendor to the 'other' provider", () => {
-  expect(toModelInfo({ ...freeModel, id: "poolside/laguna-s-2.1:free" }).provider).toBe(
-    "other"
-  );
+test("keeps an unknown vendor as its own provider", () => {
+  // Previously collapsed to "other", which put every vendor added after this
+  // file was written into one anonymous group (AUDIT.md §5.6).
+  expect(
+    toModelInfo({ ...freeModel, id: "poolside/laguna-s-2.1:free" }).provider
+  ).toBe("poolside");
+});
+
+test("an unlisted vendor still gets a name and a stable colour", () => {
+  const info = providerInfo("inclusionai");
+
+  expect(info.name).toBe("Inclusionai");
+  expect(info.color).toBe(providerInfo("inclusionai").color);
+  expect(info.color).not.toBe(providerInfo("poolside").color);
+});
+
+test("a listed vendor keeps its real capitalisation", () => {
+  expect(providerInfo("openai").name).toBe("OpenAI");
+});
+
+test("grouping contains only the providers present", () => {
+  const groups = getModelsByProvider([
+    toModelInfo(freeModel),
+    toModelInfo({ ...freeModel, id: "poolside/laguna-s-2.1:free" }),
+  ]);
+
+  expect(Object.keys(groups).sort()).toEqual(["google", "poolside"]);
+  expect(groups.google).toHaveLength(1);
 });
 
 test("labels an allowlisted paid model premium", () => {

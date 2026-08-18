@@ -7,15 +7,15 @@ import { useUser } from "@clerk/nextjs";
 import { api } from "@/convex/_generated/api";
 import { cn } from "@/lib/utils";
 import { convexErrorMessage } from "@/lib/convex-error";
-
-const ACCEPTED_TYPES = {
-  "application/pdf": "pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-    "docx",
-  "application/msword": "doc",
-  "text/plain": "txt",
-  "text/markdown": "md",
-};
+// Shared with the notebook panel: this file used to carry its own copy of the
+// accepted-type map and of `extractTextFromFile`, so a fix to one left the other
+// broken (CLAUDE.md trap 5d).
+import {
+  documentTypeFor,
+  extractTextFromFile,
+  indexDocument,
+  isAcceptedFile,
+} from "@/lib/source-upload";
 
 export function DocumentDropzone() {
   const router = useRouter();
@@ -32,39 +32,13 @@ export function DocumentDropzone() {
   const createDocument = useMutation(api.documents.createDocument);
   const generateUploadUrl = useMutation(api.documents.generateUploadUrl);
 
-  /**
-   * Extract a file's text via the server.
-   *
-   * Every type goes through `/api/process-document` — that route sniffs the
-   * magic bytes, so reading a `.txt` locally would skip the only real type
-   * check (AUDIT.md §3.5). Throws rather than returning "", so a file the
-   * server cannot identify never becomes a notebook.
-   */
-  const extractTextFromFile = async (file: File): Promise<string> => {
-    const formData = new FormData();
-    formData.append("file", file);
-
-    const response = await fetch("/api/process-document", {
-      method: "POST",
-      body: formData,
-    });
-
-    if (!response.ok) {
-      const { error } = await response.json().catch(() => ({ error: "" }));
-      throw new Error(error || "Failed to process document");
-    }
-
-    const data = await response.json();
-    return data.content || "";
-  };
-
   const processFile = async (file: File) => {
     if (!isSignedIn || !user) {
       router.push("/sign-up");
       return;
     }
 
-    if (!(file.type in ACCEPTED_TYPES)) {
+    if (!isAcceptedFile(file)) {
       setStatus("Invalid file type. Please upload a PDF, DOCX, or text file.");
       setTimeout(() => setStatus("Drop your document here to start"), 3000);
       return;
@@ -101,27 +75,24 @@ export function DocumentDropzone() {
       const docId = await createDocument({
         notebookId,
         name: file.name,
-        type: ACCEPTED_TYPES[file.type as keyof typeof ACCEPTED_TYPES],
+        type: documentTypeFor(file),
         content,
         storageId,
       });
 
       // 5. Trigger Embeddings (Background)
-      if (content && content.length > 50) {
-        setStatus("Generating AI embeddings...");
-        fetch("/api/embeddings", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            documentId: docId,
-            notebookId,
-            content,
-            documentName: file.name,
-          }),
-        }).catch(() => {
-          // Non-fatal: the notebook still opens, just without vectors yet.
-        });
-      }
+      //
+      // Not awaited, and no `setIndexStatus` follow-up: the redirect below is
+      // what the user is waiting for, and a status patch fired after navigation
+      // would race the unmount. The notebook's own upload path records the
+      // status; a source added here shows its size badge as before.
+      setStatus("Generating AI embeddings...");
+      void indexDocument({
+        documentId: docId,
+        notebookId,
+        content,
+        documentName: file.name,
+      });
 
       setStatus("Done! Redirecting...");
       router.push(`/notebook/${notebookId}`);

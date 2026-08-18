@@ -3,15 +3,17 @@
 import * as React from "react";
 import {
   FALLBACK_MODELS,
-  PROVIDERS,
   getModelsByProvider,
+  providerInfo,
   type ModelId,
   type ModelInfo,
   type Provider,
 } from "@/lib/openrouter";
 
-// Provider Icons as SVG components
-const ProviderIcons: Record<Provider, React.ReactNode> = {
+// Hand-drawn marks for the vendors worth recognising on sight. Any vendor not
+// listed here still renders — see `ProviderIcon` — so this map is decoration,
+// not a gate on which models the picker can show (AUDIT.md §5.6).
+const ProviderIcons: Record<string, React.ReactNode> = {
   google: (
     <svg viewBox="0 0 24 24" className="size-5">
       <defs>
@@ -121,15 +123,43 @@ const ProviderIcons: Record<Provider, React.ReactNode> = {
       </text>
     </svg>
   ),
-  other: (
-    <svg viewBox="0 0 24 24" className="size-5" fill="#6B7280">
-      <circle cx="12" cy="12" r="10" fillOpacity="0.2" />
-      <circle cx="8" cy="12" r="1.5" fill="#6B7280" />
-      <circle cx="12" cy="12" r="1.5" fill="#6B7280" />
-      <circle cx="16" cy="12" r="1.5" fill="#6B7280" />
-    </svg>
-  ),
 };
+
+// OpenRouter spells some vendors differently from the marks above.
+ProviderIcons["meta-llama"] = ProviderIcons.meta;
+ProviderIcons.mistralai = ProviderIcons.mistral;
+ProviderIcons.moonshotai = ProviderIcons.moonshot;
+ProviderIcons.nousresearch = ProviderIcons.nous;
+
+/**
+ * A vendor's mark, or a monogram in its derived colour when we have no mark.
+ *
+ * The fallback is the point: this used to be a single grey "Other" ellipsis
+ * shared by every vendor OpenRouter added after the icon map was written, so
+ * three unrelated providers looked like one anonymous group.
+ */
+function ProviderIcon({ provider }: { provider: Provider }) {
+  const known = ProviderIcons[provider];
+  if (known) return known;
+
+  const { name, color } = providerInfo(provider);
+
+  return (
+    <svg viewBox="0 0 24 24" className="size-5" aria-hidden="true">
+      <circle cx="12" cy="12" r="10" fill={color} fillOpacity="0.18" />
+      <text
+        x="12"
+        y="16.5"
+        textAnchor="middle"
+        fontSize="11"
+        fontWeight="bold"
+        fill={color}
+      >
+        {name.charAt(0).toUpperCase()}
+      </text>
+    </svg>
+  );
+}
 
 interface ModelSelectorProps {
   value: ModelId;
@@ -190,7 +220,11 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
 
   // Filter models based on selected provider and search
   const filteredModels = React.useMemo(() => {
-    let visible = selectedProvider ? modelsByProvider[selectedProvider] : models;
+    // `?? []` because a provider can vanish when the catalogue refreshes while
+    // its sidebar filter is still selected.
+    let visible = selectedProvider
+      ? modelsByProvider[selectedProvider] ?? []
+      : models;
 
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
@@ -230,7 +264,7 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
         className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-1.5 text-sm hover:bg-muted transition-colors"
       >
         <span className="flex size-4 shrink-0 items-center justify-center">
-          {ProviderIcons[selectedModel.provider]}
+          <ProviderIcon provider={selectedModel.provider} />
         </span>
         <span className="max-w-[120px] truncate">{selectedModel.name}</span>
         {selectedModel.tier === "free" && (
@@ -294,9 +328,10 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
                     ? "bg-primary/10 ring-2 ring-primary/30"
                     : "hover:bg-muted"
                 }`}
-                title={PROVIDERS[provider].name}
+                title={providerInfo(provider).name}
+                aria-label={providerInfo(provider).name}
               >
-                {ProviderIcons[provider]}
+                <ProviderIcon provider={provider} />
               </button>
             ))}
           </div>
@@ -329,7 +364,7 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
             {/* Header */}
             <div className="px-3 py-2 text-xs font-semibold text-muted-foreground">
               {selectedProvider
-                ? PROVIDERS[selectedProvider].name
+                ? providerInfo(selectedProvider).name
                 : "All Models"}{" "}
               ({filteredModels.length})
             </div>
@@ -348,7 +383,7 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
                   }`}
                 >
                   <span className="size-5 shrink-0">
-                    {ProviderIcons[model.provider]}
+                    <ProviderIcon provider={model.provider} />
                   </span>
                   <div className="flex flex-1 flex-col min-w-0">
                     <div className="flex items-center gap-2">

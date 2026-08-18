@@ -7,7 +7,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { SourcesPanel } from "@/components/sources-panel";
+import { SourcesPanel } from "@/components/sources/sources-panel";
 import { NotebookChat, type Citation } from "@/components/notebook-chat";
 import {
   DocumentPreview,

@@ -9,18 +9,17 @@
  * when the fetch fails.
  */
 
-export type Provider =
-  | "google"
-  | "meta"
-  | "openai"
-  | "anthropic"
-  | "mistral"
-  | "qwen"
-  | "deepseek"
-  | "nvidia"
-  | "moonshot"
-  | "nous"
-  | "other";
+/**
+ * A vendor, as OpenRouter spells it: the slug prefix (`google/gemma-4-31b` →
+ * `google`).
+ *
+ * Deliberately not a union. A union meant every vendor OpenRouter added after
+ * this file was written — poolside, inclusionai, cohere — collapsed into a
+ * single "Other" bucket with a generic name (AUDIT.md §5.6). Now the catalogue
+ * decides which providers exist and the display metadata is either known or
+ * derived.
+ */
+export type Provider = string;
 
 export interface ProviderInfo {
   id: Provider;
@@ -28,19 +27,60 @@ export interface ProviderInfo {
   color: string; // For icon background tint
 }
 
-export const PROVIDERS: Record<Provider, ProviderInfo> = {
-  google: { id: "google", name: "Google", color: "#4285F4" },
-  meta: { id: "meta", name: "Meta", color: "#0668E1" },
-  openai: { id: "openai", name: "OpenAI", color: "#10A37F" },
-  anthropic: { id: "anthropic", name: "Anthropic", color: "#D4A574" },
-  mistral: { id: "mistral", name: "Mistral", color: "#FF7000" },
-  qwen: { id: "qwen", name: "Qwen", color: "#615EFF" },
-  deepseek: { id: "deepseek", name: "DeepSeek", color: "#4D6BFE" },
-  nvidia: { id: "nvidia", name: "NVIDIA", color: "#76B900" },
-  moonshot: { id: "moonshot", name: "Moonshot", color: "#FFD700" },
-  nous: { id: "nous", name: "Nous", color: "#9333EA" },
-  other: { id: "other", name: "Other", color: "#6B7280" },
+/**
+ * Display overrides for vendors whose slug does not title-case into their real
+ * name ("openai" → "OpenAI", not "Openai"), plus their brand colour.
+ *
+ * Adding a vendor here is cosmetic — an unlisted one still gets a name, a colour
+ * and its own group in the picker.
+ */
+const KNOWN_PROVIDERS: Record<string, { name: string; color: string }> = {
+  google: { name: "Google", color: "#4285F4" },
+  "meta-llama": { name: "Meta", color: "#0668E1" },
+  meta: { name: "Meta", color: "#0668E1" },
+  openai: { name: "OpenAI", color: "#10A37F" },
+  anthropic: { name: "Anthropic", color: "#D4A574" },
+  mistralai: { name: "Mistral", color: "#FF7000" },
+  mistral: { name: "Mistral", color: "#FF7000" },
+  qwen: { name: "Qwen", color: "#615EFF" },
+  deepseek: { name: "DeepSeek", color: "#4D6BFE" },
+  nvidia: { name: "NVIDIA", color: "#76B900" },
+  moonshotai: { name: "Moonshot AI", color: "#FFD700" },
+  moonshot: { name: "Moonshot", color: "#FFD700" },
+  nousresearch: { name: "Nous Research", color: "#9333EA" },
+  nous: { name: "Nous", color: "#9333EA" },
+  "z-ai": { name: "Z.ai", color: "#00B8D9" },
+  microsoft: { name: "Microsoft", color: "#00A4EF" },
+  cohere: { name: "Cohere", color: "#39594D" },
+  xai: { name: "xAI", color: "#111111" },
 };
+
+/**
+ * Name and colour for a vendor, known or not.
+ *
+ * An unknown slug gets its words title-cased and a colour derived from the slug
+ * itself — stable across renders and distinct enough to tell two vendors apart,
+ * which is all the picker's icon tint needs.
+ */
+export function providerInfo(id: Provider): ProviderInfo {
+  const known = KNOWN_PROVIDERS[id];
+  if (known) return { id, ...known };
+
+  const name = id
+    .split(/[-_.]/)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+
+  // Cheap deterministic hash → hue. Mid lightness and moderate saturation, so
+  // one colour reads on both the light and the dark surface without a per-theme
+  // variant.
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) {
+    hash = (hash * 31 + id.charCodeAt(i)) % 360;
+  }
+
+  return { id, name, color: `hsl(${hash} 58% 52%)` };
+}
 
 export interface ModelInfo {
   id: string;
@@ -82,33 +122,23 @@ const PREMIUM_ALLOWLIST = [
 ];
 
 /**
- * Shown when the catalogue fetch fails — enough to keep the picker usable, not
- * a second list to maintain. Every entry was verified live on 2026-07-30.
+ * Shown when the catalogue fetch fails: one entry, derived from `DEFAULT_MODEL`.
+ *
+ * It used to be three hand-written entries with hand-written names, context
+ * lengths and tiers — a second catalogue to maintain, and the one place a stale
+ * slug could not be filtered out against the live list. One entry is enough to
+ * keep the picker from rendering empty, and it costs nothing when stale: if
+ * `/api/v1/models` is unreachable then `/chat/completions` almost certainly is
+ * too, so the request was going to fail whichever slug it carried.
  */
 export const FALLBACK_MODELS: ModelInfo[] = [
   {
     id: DEFAULT_MODEL,
-    name: "Gemma 4 31B",
-    description: "Free, 262K context",
-    contextLength: 262144,
+    name: DEFAULT_MODEL.split("/")[1]?.replace(/:free$/, "") ?? DEFAULT_MODEL,
+    description: "Free · catalogue unavailable",
+    contextLength: 0,
     tier: "free",
-    provider: "google",
-  },
-  {
-    id: "nvidia/nemotron-3-nano-30b-a3b:free",
-    name: "Nemotron 3 Nano 30B",
-    description: "Free, fast, 256K context",
-    contextLength: 256000,
-    tier: "free",
-    provider: "nvidia",
-  },
-  {
-    id: "openai/gpt-4o-mini",
-    name: "GPT-4o mini",
-    description: "Paid, reliable, 128K context",
-    contextLength: 128000,
-    tier: "premium",
-    provider: "openai",
+    provider: DEFAULT_MODEL.split("/")[0],
   },
 ];
 
@@ -147,8 +177,9 @@ export function isOfferedModel(raw: RawModel): boolean {
 
 /** Exported for `lib/openrouter.test.ts`. */
 export function toModelInfo(raw: RawModel): ModelInfo {
-  const prefix = raw.id.split("/")[0];
-  const provider = (prefix in PROVIDERS ? prefix : "other") as Provider;
+  // Whatever vendor the slug names, listed or not — `providerInfo()` finds it a
+  // name and a colour either way.
+  const provider = raw.id.split("/")[0];
 
   // OpenRouter prefixes display names with the vendor ("Google: Gemma 4 31B"),
   // which the picker already shows as an icon.
@@ -231,16 +262,21 @@ export async function resolveModel(model?: string): Promise<ModelId> {
   return pickDefaultModel(catalogue);
 }
 
-/** Group a catalogue for the picker's provider sidebar. */
+/**
+ * Group a catalogue for the picker's provider sidebar.
+ *
+ * Keyed by the providers actually present, in the order the catalogue lists
+ * them — the previous version pre-seeded a fixed set of keys, which is what
+ * forced every new vendor into "Other" and left empty groups for vendors that
+ * had retired.
+ */
 export function getModelsByProvider(
   models: ModelInfo[]
 ): Record<Provider, ModelInfo[]> {
-  const groups = Object.fromEntries(
-    Object.keys(PROVIDERS).map((provider) => [provider, [] as ModelInfo[]])
-  ) as Record<Provider, ModelInfo[]>;
+  const groups: Record<Provider, ModelInfo[]> = {};
 
   for (const model of models) {
-    groups[model.provider].push(model);
+    (groups[model.provider] ??= []).push(model);
   }
 
   return groups;

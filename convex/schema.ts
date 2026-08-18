@@ -52,6 +52,11 @@ export default defineSchema({
     // quota. Recorded here so a delete can subtract without re-reading the
     // storage metadata of a file it is about to remove.
     bytes: v.optional(v.number()),
+    // "indexed" | "skipped" | "failed" — whether this source made it into the
+    // vector store. Without it a source that never embedded looks identical to
+    // one that did, while silently contributing nothing to any answer
+    // (AUDIT.md §9.6). Absent on rows created before it existed.
+    indexStatus: v.optional(v.string()),
   })
     .index("by_notebook", ["notebookId"])
     .index("by_user", ["userId"])

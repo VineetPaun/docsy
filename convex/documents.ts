@@ -159,6 +159,62 @@ export const updateDocumentContent = mutation({
   },
 });
 
+/**
+ * Rename a source.
+ *
+ * The name is the only thing identifying a source in the list and in a
+ * citation, and an upload is named by its filename — "scan_0043.pdf" tells the
+ * user nothing (AUDIT.md §9.6).
+ *
+ * Trimmed and length-capped here rather than in the UI: this is a public HTTP
+ * endpoint, and an unbounded string would be stored, listed and sent to the
+ * model on every request.
+ */
+export const renameDocument = mutation({
+  args: {
+    documentId: v.id("documents"),
+    name: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    await requireOwnedDocument(ctx, user, args.documentId);
+
+    const name = args.name.trim().slice(0, 200);
+
+    if (!name) {
+      throw new ConvexError("A source needs a name.");
+    }
+
+    await ctx.db.patch(args.documentId, { name });
+  },
+});
+
+/**
+ * Record whether a source reached the vector store.
+ *
+ * Written by the client after the `/api/embeddings` call it fired, because that
+ * call is what knows the outcome. Worth nothing as a security claim — a caller
+ * can only mislabel its own sources — and worth a lot as feedback: an
+ * unindexed source produces no citations, which otherwise looks exactly like a
+ * question the sources do not answer.
+ */
+export const setIndexStatus = mutation({
+  args: {
+    documentId: v.id("documents"),
+    status: v.union(
+      v.literal("indexed"),
+      v.literal("skipped"),
+      v.literal("failed")
+    ),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    await requireOwnedDocument(ctx, user, args.documentId);
+
+    await ctx.db.patch(args.documentId, { indexStatus: args.status });
+  },
+});
+
 // Delete a document
 export const deleteDocument = mutation({
   args: { documentId: v.id("documents") },

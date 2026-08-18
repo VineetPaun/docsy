@@ -345,8 +345,18 @@ async function postCompletion(
   // longer resolves, or one a caller invented, becomes the default.
   const validModel = await resolveModel(model);
 
+  // LLM observability (AUDIT.md §10): with no idea what models cost, which fail
+  // or how slow they are, a multi-model app is flying blind. Helicone is a
+  // pass-through gateway, so this is a base-URL swap and one header rather than
+  // a dependency and a wrapper around every call. Unset key → straight to
+  // OpenRouter, byte-identical to before.
+  const heliconeKey = process.env.HELICONE_API_KEY;
+  const endpoint = heliconeKey
+    ? "https://openrouter.helicone.ai/api/v1/chat/completions"
+    : "https://openrouter.ai/api/v1/chat/completions";
+
   const response = await fetch(
-    "https://openrouter.ai/api/v1/chat/completions",
+    endpoint,
     {
       method: "POST",
       headers: {
@@ -355,6 +365,15 @@ async function postCompletion(
         "HTTP-Referer":
           process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
         "X-Title": "Docsy - Document Chat",
+        ...(heliconeKey
+          ? {
+              "Helicone-Auth": `Bearer ${heliconeKey}`,
+              // Enough to split cost by model and by streaming vs buffered
+              // without sending anything about the user or their documents.
+              "Helicone-Property-Model": validModel,
+              "Helicone-Property-Mode": stream ? "stream" : "buffered",
+            }
+          : {}),
       },
       body: JSON.stringify({
         model: validModel,

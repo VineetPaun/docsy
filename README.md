@@ -78,6 +78,11 @@ not `.cloud`) for `user.created` / `user.updated` / `user.deleted`. **Without th
 webhook no user record is ever created and nobody can use the app.** Each of
 these fails silently and differently; `.env.example` has the symptom table.
 
+Two optional keys are worth setting once the app is real: `SENTRY_DSN` /
+`NEXT_PUBLIC_SENTRY_DSN` for error reporting, and `HELICONE_API_KEY`, which
+routes OpenRouter calls through Helicone's pass-through gateway so you can see
+what each model costs and how often it fails. Both are inert when unset.
+
 ### 4. Run the Development Server
 
 Two terminals — the app is non-functional without the Convex backend:

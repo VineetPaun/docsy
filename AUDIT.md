@@ -19,6 +19,17 @@ Bare record of what has been removed, so nobody re-audits it as a fresh finding.
 
 | Date | Removed | Landed in |
 |---|---|---|
+| 2026-08-18 | §3.5 — no per-user quota in *bytes* | `convex/lib/quota.ts` — `users.storageBytes` maintained on create, content rewrite and both cascade paths; size read from `_storage` metadata, never from the client; `ConvexError` names the ceiling. `lib/quota.test.ts`. **Phase 0 code is now complete** |
+| 2026-08-18 | §10 — webhook replay could overwrite a newer profile | `users.claimWebhookEvent` + a `webhookEvents` table; `convex/http.ts` applies each `svix-id` once and 200s a duplicate. Stale ids pruned on the write path, no cron |
+| 2026-08-18 | §8 — `.collect()` + JS sort on every list read | `by_user_updated` / `by_notebook_created` / `by_notebook_time` indexes; `getMessages` bounded to the newest 200 off the index; both count caps use `take()` |
+| 2026-08-18 | §8 — sequential uploads | `lib/concurrency.ts` `mapWithConcurrency` (tested), 3 files in flight; progress reports finished-of-total |
+| 2026-08-18 | §6.2 — `sources-panel.tsx` was a 1,211-line god component | `components/sources/*` — a 290-line composition root, one file per concern (`source-list`, `url-import-panel`, `web-search-panel`, `audio-overview-panel`, `rename-source-dialog`, `source-icon`) and two hooks. **`notebook-chat.tsx` and `dashboard/page.tsx` still want the same treatment — that residual is §6.2** |
+| 2026-08-18 | §9.6 — missing basics | `documents.indexStatus` + a badge that says when a source never reached the vector store; `documents.renameDocument` + a Radix rename dialog; a name filter past four sources; row actions visible on touch instead of hover-only; honest empty-state copy |
+| 2026-08-18 | §10 — no error tracking, no LLM observability | `instrumentation.ts` (Next's `onRequestError`) + `instrumentation-client.ts`, inert without a DSN, traces/replay/PII off; Helicone as a base-URL swap in `postCompletion` — no dependency, byte-identical requests when unkeyed |
+| 2026-08-18 | §10 — no `SECURITY.md`, nothing watching dependencies | `SECURITY.md` (private-reporting path, scope, known residuals) + `.github/dependabot.yml`, grouped weekly, eslint major held per CLAUDE.md trap 8 |
+| 2026-08-18 | §7 — no eval harness, no query transformation, `limit: 5` hardcoded | `scripts/eval-retrieval.ts` (`bun run eval <notebookId>` → hit@3 / hit@20 / MRR); `lib/query-rewrite.ts` resolves context-dependent follow-ups against the last two turns, falling back to the original text; `retrievalLimitFor()` scales k with the model's window, clamped 5–20. **Reranking and hybrid search stay open — see §7** |
+| 2026-08-18 | §5.7 — Clerk held at v6, TypeScript held at 5.9 | `@clerk/nextjs@7` (`useSignIn`/`useSignUp` from `/legacy`, `<Show when>` for `<SignedIn>`/`<SignedOut>`, fallback redirect props), `typescript@7` + `experimental.useTypeScriptCli`, `@qdrant/js-client-rest@1.19` (`query()` replaces `search()`). **The eslint/typescript-eslint blocker is unchanged — see §5.7** |
+| 2026-08-18 | CLAUDE.md trap 5d — `extractTextFromFile` duplicated in both dropzones | `lib/source-upload.ts` — one copy of the accepted-type map, the extraction call and the embedding call |
 | 2026-07-27 | §3.2 — all 9 API routes unauthenticated | `proxy.ts`, `lib/api-auth.ts`, all 8 handlers; `/api/debug` deleted |
 | 2026-07-27 | §3.3 — SSRF in `/api/process-url` | `lib/url-guard.ts` |
 | 2026-07-27 | §5.4 — 11 unused packages | `package.json`, `bun.lock` |
@@ -80,7 +91,7 @@ Partial progress on §3.5, §4.9, §5.6 and §6.5 is folded into those sections;
 
 Docsy is a NotebookLM-style RAG app. A user creates a **notebook**, adds **sources** (PDF/DOCX/TXT uploads, web URLs, YouTube videos), and chats with an LLM that answers only from those sources, with inline `[1]`-style citations that open the source text at the cited passage. It also generates AI "audio overviews" (podcast-style summaries).
 
-Stack: **Next.js 16** (App Router, `proxy.ts` not `middleware.ts`) · **Convex** (database + file storage + reactive queries) · **Clerk** (auth) · **Qdrant** (vector search) · **OpenRouter** (LLM gateway, 19 models) · **Google Gemini** (embeddings) · **ElevenLabs** (TTS) · **Tailwind 4** + shadcn/ui · **Bun** (package manager and runtime).
+Stack: **Next.js 16** (App Router, `proxy.ts` not `middleware.ts`) · **Convex** (database + file storage + reactive queries) · **Clerk** (auth) · **Qdrant** (vector search) · **OpenRouter** (LLM gateway, live catalogue) · **Google Gemini** (embeddings) · **ElevenLabs** (TTS) · **Tailwind 4** + shadcn/ui · **Bun** (package manager and runtime).
 
 ### 0.2 Is this report still accurate? (staleness check)
 
@@ -122,7 +133,7 @@ bun run lint        # eslint
 | **[verify]** | **From model knowledge, not checked against a live source.** All package-version and library-capability claims. Confirm with `bun outdated` or the vendor's docs before acting. |
 | "may already be broken" | An inference from dates, not an observed failure. Test it. |
 
-Collected `[verify]` items, so you don't have to hunt: Qdrant multivector support in `ROADMAP.md` §2.1. §5.7 was confirmed against `bun outdated`; §5.6's model slugs were confirmed against the live OpenRouter catalogue on 2026-07-30 (16 of 19 were dead), and §5.1's SDK swap is done.
+Collected `[verify]` items, so you don't have to hunt: Qdrant multivector support in `ROADMAP.md` §2.1. §5.7 was confirmed against `bun outdated` (and re-confirmed on 2026-08-18, when Clerk 7, TypeScript 7 and Qdrant 1.19 landed); §5.6's model slugs were confirmed against the live OpenRouter catalogue on 2026-07-30 (16 of 19 were dead), and §5.1's SDK swap is done.
 
 ### 0.5 Complete environment variable inventory
 
@@ -134,7 +145,7 @@ The README documents 5 of these. `.env.example` now carries the full list with i
 | `CONVEX_DEPLOYMENT` | Convex CLI | Deploys | Not read by app code |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk SDK (implicit) | Auth | Not in a `process.env` grep — SDK reads it |
 | `CLERK_SECRET_KEY` | Clerk SDK (implicit) | Auth | Same |
-| `CLERK_JWT_ISSUER_DOMAIN` | **does not exist yet** | **§3.1 fix** | You must add this for Convex↔Clerk auth |
+| `CLERK_JWT_ISSUER_DOMAIN` | `convex/auth.config.ts` | **§3.1** | Set on the *Convex deployment*, not in `.env.local` |
 | `OPENROUTER_API_KEY` | `lib/openrouter.ts:284`, `api/chat`, `api/research` | All chat | Without it, `/api/chat` and `/api/research` return 503 naming it |
 | `GOOGLE_API_KEY` *or* `GEMINI_API_KEY` | `lib/embeddings.ts:10` | Embeddings / RAG | Either works; `GOOGLE_API_KEY` checked first |
 | `QDRANT_URL` | `lib/qdrant.ts:10` | Vector search | Defaults to `http://localhost:6333` |
@@ -144,6 +155,9 @@ The README documents 5 of these. `.env.example` now carries the full list with i
 | `TAVILY_API_KEY` | `api/web-search/route.ts:28` | Web search | Tried first |
 | `SERPER_API_KEY` | `api/web-search/route.ts:29` | Web search | Fallback |
 | `NEXT_PUBLIC_APP_URL` | `lib/openrouter.ts` | OpenRouter attribution | Defaults to `localhost:3000` |
+| `HELICONE_API_KEY` | `lib/openrouter.ts` `postCompletion` | LLM cost/latency metrics | Absent → calls go straight to OpenRouter, unchanged |
+| `SENTRY_DSN` | `instrumentation.ts` | Server error reporting | Absent → the SDK never initialises |
+| `NEXT_PUBLIC_SENTRY_DSN` | `instrumentation-client.ts` | Browser error reporting | Public by design; separate from the server DSN on purpose |
 
 **Degradation behaviour worth knowing:** the three routes that used to fabricate "demo" output now 503 and name the missing variable, so a misconfigured chat, web search or research call says so. `/api/chat` joined them: without `QDRANT_URL` or an embeddings key it 503s naming the variable, because the raw-text fallback that used to cover for them is gone. One quiet one remains: no `ELEVENLABS_API_KEY` yields a script with no audio. This is why §0.3 verification matters.
 
@@ -167,6 +181,8 @@ The problem is that it was built fast and never hardened. At the time of the aud
 >
 > **Update 2026-07-30:** per-user rate limits guard the three paid routes (was §3.4), and `/api/chat` loads sources from Convex instead of trusting the request body (was §4.5, §4.7). **What is left in Phase 0 is a storage quota (§3.5) — and still, none of it has been exercised at runtime.**
 >
+**Update 2026-08-18:** Phase 0's code is complete — a byte quota closes §3.5, so the ceiling is size rather than 25 × 50 × 10 MB. Clerk 7 and TypeScript 7 landed (§5.7, and `bun run lint` no longer runs — see CLAUDE.md trap 8). `sources-panel.tsx` is split (§6.2), uploads run three at a time and list reads come off sorted indexes (§8), sources say when they never indexed and can be renamed and filtered (§9.6), errors reach Sentry and LLM spend reaches Helicone (§10), and retrieval has an eval harness plus query rewriting (§7). **Still nothing exercised at runtime.**
+>
 > **Update 2026-07-30, later:** `/api/audio-overview` closed the same hole `/api/chat` had — ownership check plus server-side source loading (was §4.7). **Demo mode is deleted**, so a missing key is a 503 that names it rather than fabricated output (was §6.6). The podcast script is single-narrator, matching the one voice that reads it (was §4.4). Accessible names, keyboard paths and `prefers-reduced-motion` landed (§9.4 now covers only focus management and an actual audit).
 
 ### Scorecard
@@ -174,14 +190,14 @@ The problem is that it was built fast and never hardened. At the time of the aud
 | Area | Grade | One-line verdict |
 |---|---|---|
 | Feature breadth | **A−** | Ambitious and mostly delivered |
-| Security | **B−** | IDOR closed, routes check ownership, rate limits in place; unproven at runtime, no storage quota |
+| Security | **B** | IDOR closed, routes check ownership, rate limits and a byte quota in place; webhook deliveries applied once. Unproven at runtime |
 | Data integrity | **B−** | Deletes cascade and retry; audio persists and is narrated in full. Unproven at runtime |
-| Dependency health | **B+** | Deprecated Google SDK replaced, duplicate UI and icon libraries removed; 3 packages pinned back on upstream blockers (§5.7) |
-| RAG quality | **C** | Works, but naive — no reranking, no hybrid, top-5 fixed |
-| Code quality | **B−** | 1200-line god component remains; `console.*` and `any` now effectively zero |
-| Testing / CI | **D+** | 8 unit test files + CI on push/PR; no integration or E2E coverage |
-| Performance / cost | **C** | Rate limits, bounded payloads, streamed answers and optimistic sends; no caching, and `.collect()` + JS sort is still everywhere (§8) |
-| Mobile / a11y | **C+** | Notebook page is responsive now; dashboard is not. Accessible names, keyboard paths, reduced-motion and dialog focus management are in; any real audit is not (§9.4) |
+| Dependency health | **A−** | Everything on latest (Clerk 7, TypeScript 7, Qdrant 1.19); Dependabot watches it now. One upstream blocker left, and it costs the lint run (§5.7) |
+| RAG quality | **C+** | Query rewriting, context-scaled `k` and an eval harness to measure with; still no reranking and no hybrid search (§7) |
+| Code quality | **B** | Sources panel split into components/sources/*; `notebook-chat.tsx` and the dashboard page are the remaining large files. `console.*` and `any` effectively zero |
+| Testing / CI | **C−** | 11 unit test files (65 cases) + CI on push/PR; still no route, Convex-function or E2E coverage, and the eslint step cannot pass |
+| Performance / cost | **B−** | Sorted indexes, a bounded transcript read, parallel uploads, streamed answers; no caching yet (§8) |
+| Mobile / a11y | **B−** | Notebook page is responsive and row actions no longer hide behind hover on touch; dashboard has not had the pass. Accessible names, keyboard paths, reduced-motion and dialog focus management are in; any real audit is not (§9.4) |
 
 ### The 3 things to do this week
 
@@ -269,14 +285,6 @@ curl -X POST https://<deployment>.convex.site/clerk-webhook -d '{"type":"user.de
 
 **Known race:** a brand-new signup can reach the dashboard before the webhook lands. Queries return empty (`getUser` → null, handled everywhere) and reactive queries fill in when the row appears, but a mutation fired in that window throws "User not provisioned". Retrying works. Worth a proper loading state if it proves visible in practice.
 
-### 3.5 🟡 No per-user storage quota in bytes
-
-Bounded now: 10 MB per file, 20 files per drop (UX), `MAX_DOCUMENTS_PER_NOTEBOOK = 50` in `createDocument`, and `MAX_NOTEBOOKS_PER_USER = 25` in `createNotebook`. Both caps throw a `ConvexError` whose text reaches the user — `lib/convex-error.ts` unwraps `.data`, which the dashboard, the landing dropzone and the sources panel all now use instead of a generic toast. Type comes from `sniffFileType()` reading magic bytes, not from `file.type`.
-
-**What remains:** the ceiling is a count, not a size — 25 × 50 × 10 MB is a 12.5 GB worst case per account. A summed-bytes column on `users`, maintained on upload and on cascade delete, would make it a real quota; nothing needs it until an account gets close enough for the difference to cost money. `getNotebookCount` (`convex/notebooks.ts`) exists for a UI hint and is still uncalled by the client.
-
-⚠️ The sniffer is the only type check, so `/api/process-document` is now load-bearing for *every* upload including plain text — both dropzones route through it. Do not add a client-side shortcut that reads a file locally to "save a round trip"; that reopens the hole.
-
 ### 3.6 🟡 Residuals from the Phase 0 route fixes
 
 - **DNS rebinding is not covered.** `lib/url-guard.ts` resolves the hostname, checks the addresses, then calls `fetch`, which resolves again. A host that answers public on the first lookup and private on the second still gets through. Closing it needs a custom HTTP agent that pins the validated IP. Documented in that file's header.
@@ -339,45 +347,31 @@ The catalogue is fetched from `GET https://openrouter.ai/api/v1/models`, cached 
 
 **What still rots, slowly:**
 
-- `PREMIUM_ALLOWLIST` and `FALLBACK_MODELS` in `lib/openrouter.ts` are hand-written. Dead entries in the allowlist vanish harmlessly (it is intersected with the live list), but new models never appear until someone adds them, and `FALLBACK_MODELS` — used only when the fetch fails, and now the only path that can reach `DEFAULT_MODEL` — can go stale unnoticed. Verified live 2026-07-30.
-- The `Provider` union is hardcoded, so new vendors (poolside, inclusionai, cohere…) render under "Other" with a generic icon.
+- `PREMIUM_ALLOWLIST` in `lib/openrouter.ts` is hand-written. Dead entries vanish harmlessly (it is intersected with the live list), but a new paid model never appears until someone adds it. Verified live 2026-07-30.
+
+`FALLBACK_MODELS` is no longer a second catalogue — it is one entry derived from `DEFAULT_MODEL`, and a stale slug there costs nothing: if `/api/v1/models` is unreachable then `/chat/completions` almost certainly is too. `Provider` is now the slug prefix rather than a union, so a vendor nobody listed gets its own group, name and colour (`providerInfo()`) instead of collapsing into "Other".
 
 (`/api/chat`'s direct OpenAI / Anthropic fallback branches are gone, along with the `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` vars they read — OpenRouter already fronts every provider.)
 
-### 5.7 🟠 Three packages are held one major behind, each blocked
+### 5.7 🟠 `eslint` is held one major behind, and the lint run is broken
 
-Every other dependency is on latest as of 2026-07-27. These three are deliberately pinned back — **do not bump them casually, each fails for a concrete reason:**
+Every dependency is now on latest — Clerk 7, TypeScript 7 and Qdrant client 1.19 landed on 2026-08-18 — with one exception, and one accepted consequence.
 
 | Package | Pinned | Latest | Why it is held |
 |---|---|---|---|
-| `@clerk/nextjs` | `^6.39.6` | `7.6.1` | v7 removes the `SignedIn` / `SignedOut` components and replaces `useSignIn` / `useSignUp` with a signals API. 23 type errors across 8 files, ~1,140 lines of hand-rolled auth UI (`sign-in`, `sign-up`, `sign-up/verify`, `forgot-password`, `reset-password`, `sso-callback`, `landing/cta.tsx`, `landing/navbar.tsx`). A real migration, and one that cannot be verified without Clerk keys and a running app. |
-| `eslint` | `^9.39.5` | `10.8.0` | Blocked upstream. `eslint-config-next@16.2.12` depends on `typescript-eslint@^8`, which peer-requires `eslint ^8.57 \|\| ^9`. On ESLint 10 the lint run dies with `TypeError: Class extends value undefined`. Unblocks when Next ships a config built on `typescript-eslint@9`. |
-| `typescript` | `^5.9.3` | `7.0.2` | The project itself **compiles clean under TS 7**, but the same `typescript-eslint@8` peer-caps TypeScript at `<6.0.0`, and lint dies with `TypeError: Cannot read properties of undefined (reading 'Cjs')`. Same unblock condition as ESLint. |
+| `eslint` | `^9.39.5` | `10.8.0` | Blocked upstream. `eslint-config-next` depends on `typescript-eslint@^8`, which peer-requires `eslint ^8.57 \|\| ^9`. On ESLint 10 the lint run dies with `TypeError: Class extends value undefined`. |
 
-Recheck with `bun outdated`. The two toolchain rows share one blocker, so they will likely clear together.
+**`bun run lint` does not run at all right now**, and that was accepted knowingly when TypeScript 7 landed: TS 7 is the native compiler and ships no JS compiler API, which `typescript-eslint@8` `require()`s, so eslint dies with `TypeError: Cannot read properties of undefined (reading 'Cjs')` before linting a file. `tsc --noEmit` and `bun test` are the signal until `typescript-eslint` supports TS 7. CLAUDE.md trap 8 has the detail; recheck the peer range with `bun outdated`.
 
 ---
 
 ## 6. Code quality
 
-### 6.2 🔴 `sources-panel.tsx` is a 1,200-line god component
+### 6.2 🟡 Two components are still doing too much
 
-One component owns: drag-and-drop upload, PDF/DOCX extraction orchestration, web search UI + results, URL/YouTube ingestion, audio overview generation, document selection, delete confirmation dialogs, and document preview. It holds **13 `useState` hooks**.
+`sources-panel.tsx` was the 1,211-line, 13-`useState` version of this problem and is now `components/sources/*` — composition root, one file per concern, two hooks. That split is the pattern to copy.
 
-Split into:
-```
-components/sources/
-  sources-panel.tsx        // layout + composition only
-  source-list.tsx
-  source-upload-dropzone.tsx
-  web-search-panel.tsx
-  url-import-panel.tsx
-  audio-overview-panel.tsx
-  hooks/use-document-upload.ts   // upload → extract → store → embed pipeline
-  hooks/use-audio-overview.ts
-```
-
-`notebook-chat.tsx` (734 lines) and `dashboard/page.tsx` (408 lines) need the same treatment, less urgently.
+Still outstanding, less urgently: `notebook-chat.tsx` (728 lines — chat, streaming, citations, model picker, retry) and `app/dashboard/page.tsx` (408 lines).
 
 ### 6.5 🟠 No shared error handling
 
@@ -393,21 +387,20 @@ Standardize on one `withApiHandler` wrapper and one error envelope: generic mess
 
 ## 7. RAG quality
 
-The pipeline is `fixed-size chunk → single embedding → top-5 cosine → stuff into prompt`. That's the 2023 baseline. Concretely, what's missing:
+The pipeline is `chunk → single dense embedding → cosine top-k → stuff into prompt`, with a score floor (`DEFAULT_SCORE_THRESHOLD = 0.5`, enforced by Qdrant), conversational query rewriting (`lib/query-rewrite.ts`) and a `k` that scales with the model's window (`retrievalLimitFor`, clamped 5–20). What is still missing:
 
 | Gap | Impact | Fix |
 |---|---|---|
-| **No reranking** | Top-5 by cosine includes near-misses; precision suffers most on multi-doc notebooks | Retrieve 20, rerank to 5 with Cohere Rerank 3 or a hosted `bge-reranker-v2` |
-| **No hybrid search** | Pure-dense misses exact terms, product names, IDs, acronyms | Qdrant supports sparse vectors natively — add BM25/SPLADE and fuse with RRF |
-| **No query transformation** | "what about the second one?" embeds as garbage | Rewrite the query using conversation history before embedding; add HyDE for sparse notebooks |
-| **Fixed `limit: 5`** | Hardcoded in `chat/route.ts` regardless of question complexity or model context | Scale `k` to the model's context window |
+| **No reranking** | Top-k by cosine includes near-misses; precision suffers most on multi-doc notebooks. This is why `k` is clamped at 20 — more chunks without a reranker buries the answer | Retrieve 20, rerank to 5 with Cohere Rerank or a hosted `bge-reranker-v2`. **Needs a decision: a new paid key and a new failure mode on the chat path** |
+| **No hybrid search** | Pure-dense misses exact terms, product names, IDs, acronyms | Qdrant supports sparse vectors natively — add BM25/SPLADE and fuse with RRF. **Needs a decision: sparse vectors mean collection `_v3` and a full re-index of every existing source** |
 | **Naive chunking** | `chunkSize: 1000` chars, char-based, splits mid-table and mid-code-block | Structure-aware splitting (markdown headings, PDF paragraph blocks) + token-based sizing |
 | **No parent-document retrieval** | Model sees a 1000-char window with no surrounding context | Embed small chunks, return the enclosing section |
 | **No multi-query** | Single embedding, single recall shot | Generate 3 query variants, union + RRF |
+| **No HyDE for sparse notebooks** | A short question against long formal sources embeds poorly | Draft a hypothetical answer, embed that instead |
 
-The score floor is in (`DEFAULT_SCORE_THRESHOLD = 0.5`, enforced by Qdrant). **Highest ROI from here, in order:** reranking (biggest single quality jump) → hybrid search → query rewriting.
+**Highest ROI from here, in order:** reranking (biggest single quality jump) → hybrid search → structure-aware chunking.
 
-Add a small **eval harness** (20–30 Q/A pairs over a fixed corpus, scored on retrieval hit-rate and answer faithfulness) before making any of these changes, or you'll have no idea whether they helped.
+**Measure every one of them with the harness** — `bun run eval <notebookId>` against `eval/questions.json`, reporting hit@3, hit@20 and MRR (`scripts/eval-retrieval.ts`). Retrieval-only: answer faithfulness still needs a judge model and ground-truth answers, which is a bigger commitment than the thing it grades.
 
 ---
 
@@ -415,9 +408,8 @@ Add a small **eval harness** (20–30 Q/A pairs over a fixed corpus, scored on r
 
 | Issue | Where | Fix |
 |---|---|---|
-| **Sequential document uploads** | `sources-panel.tsx` `handleFiles` — a `for` loop awaiting extract→upload→embed per file | Parallelize with a concurrency limit (3–4); show per-file progress. |
-| **`.collect()` everywhere + JS sort** | `notebooks.ts:22`, `documents.ts:27`, `messages.ts:27`, etc. — loads every row then sorts in memory | Add sorted indexes (`by_notebook_timestamp`) and use `.order("desc").take(n)`. Chat history will be the first to hurt. |
 | **No caching** | Identical questions re-embed and re-infer every time | Cache embeddings by content hash; add OpenRouter prompt caching for the system prompt. |
+| **One extra completion per follow-up** | `lib/query-rewrite.ts` — a context-dependent question buys a small rewrite call before retrieval | Accepted: 120 max tokens at temperature 0, and only when `needsRewrite()` fires. Watch it in Helicone; if it shows up in the bill, cache rewrites by (question, last turn). |
 | **Convex 1 MB document limit** | Docs store up to 50k chars of `content` inline — fine now, but a hard ceiling | Move full text to Convex storage / R2; keep only metadata + a snippet in the row. |
 
 ---
@@ -444,25 +436,17 @@ Every icon-only control has an accessible name, both dropzones have a keyboard p
 
 - **Nothing has been run through `axe`**, and none of this was checked with a screen reader or by tabbing the app in a browser. The fixes were written by reading. Focus management now comes from Radix in every dialog, which is worth more than the previous hand-rolled overlays, but it has still never been observed working.
 
-### 9.6 🟡 Missing basics
-
-No empty states for a notebook with zero sources beyond the dropzone; no per-source processing status (a doc that failed extraction looks identical to a good one); no way to rename a document; no search/filter over sources; no way to see *why* a source has no content.
-
 ---
 
 ## 10. Missing engineering infrastructure
 
 | Missing | Recommendation |
 |---|---|
-| **Tests** (8 files, 40 cases) | `qdrant` (page-number attribution), `file-type` (magic-byte sniffing), `rate-limit` (window maths), `embeddings` (retry predicate), `openrouter` (catalogue filter), `tts-chunks` (narration splitting), `env` (boot-required vars) and `prompt-guard` (source fencing) run under `bun test` — no runner config needed, so no Vitest dependency is warranted. Extend to the remaining `lib/` pure functions (chunk offsets, model validation). Playwright for the upload → chat → citation flow. |
+| **Tests** (11 files, 65 cases) | `qdrant` (page attribution + retrieval breadth), `file-type`, `rate-limit`, `embeddings`, `openrouter`, `tts-chunks`, `env`, `prompt-guard`, `quota` (storage ceiling), `concurrency` (upload pool) and `query-rewrite` run under `bun test` — no runner config, so no Vitest dependency is warranted. **Nothing covers a route handler or a Convex function**, and Playwright for the upload → chat → citation flow is still owed. |
 | **CI** | `.github/workflows/ci.yml` runs `tsc --noEmit`, `eslint` and `bun test` on push and PR. **`next build` is not in it** — prerendering `/_not-found` needs a real `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`; add it as a repo secret and a build step once one exists. |
 | **`prettier`** | Not installed; formatting drifts (`lib/openrouter.ts` uses trailing commas, `lib/qdrant.ts` doesn't). Add + `--check` in CI. |
-| **Error tracking** | Sentry — you currently have zero visibility into production failures. |
-| **LLM observability** | Helicone or Langfuse — you have no idea what models cost, which fail, or what latency users see. Critical for a multi-model app. |
-| **Webhook replay/idempotency** | `convex/http.ts` handles Clerk retries safely today (upsert + delete are both idempotent), but nothing records `svix-id`, so a replayed *old* event can overwrite a newer profile. Store seen ids with a TTL if profile drift shows up. |
-| **`CONTRIBUTING.md` / `CLAUDE.md`** | Conventions for a repo that will be worked on by agents and humans. |
-| **Dependabot / Renovate** | This report exists because nothing watched dependencies for 6 months. Automate it. |
-| **`SECURITY.md`** | Public repo (there's a GitHub link in the navbar) with no disclosure path. |
+| **`CONTRIBUTING.md`** | `CLAUDE.md` covers agents; a human contributor still has nothing. |
+| **Sentry source maps** | `instrumentation.ts` reports errors, but `withSentryConfig` is not wrapped around `next.config.ts`, so stack traces stay minified. Needs a real org, project and auth token. |
 
 The README's **"20+ top-tier AI models"** claim is true again now the catalogue is live (§5.6), and it now names Qdrant, Gemini embeddings, ElevenLabs and Tavily/Serper.
 
@@ -517,9 +501,8 @@ Every item below has a **"Done when"** criterion. If you can't demonstrate the c
 | # | Task | § | Done when |
 |---|---|---|---|
 | 1b | **← START HERE.** Set `CLERK_JWT_ISSUER_DOMAIN` on the Convex deployment, then sign in and confirm identity resolves | §3.1 | A temporary query logging `await ctx.auth.getUserIdentity()` returns non-null; create a notebook, upload a doc, chat, delete — all work |
-| 4b | Per-user storage quota in *bytes* (the notebook cap itself is done) | §3.5 | A summed-bytes ceiling exists, so 25 notebooks × 50 sources × 10 MB is no longer the only limit |
 
-**Phase 0 exit gate:** you can hand the public Convex URL to a stranger and lose nothing. **Code says yes; nothing has proven it.** Item 1b is the proof.
+**Phase 0 exit gate:** you can hand the public Convex URL to a stranger and lose nothing. **All of Phase 0's code is written; nothing has proven it.** Item 1b is the proof.
 
 ### Phase 1 — Unbreak (weeks 2–3)
 
@@ -535,13 +518,11 @@ Every item below has a **"Done when"** criterion. If you can't demonstrate the c
 The remaining phases are lower-risk and less order-dependent, so they're listed without individual gates.
 
 ### Phase 2 — Quality (weeks 4–6)
-17. Split `sources-panel.tsx` — **§6.2**
-19. Extend `bun test` coverage + Playwright (CI itself is done) — **§10**
-20. Sentry + Helicone/Langfuse — **§10**
+17. Split `notebook-chat.tsx` and `dashboard/page.tsx`, the way `sources-panel.tsx` went — **§6.2**
+19. Route-handler and Convex-function tests + Playwright (CI and the `lib/` unit tests are done) — **§10**
 
 ### Phase 3 — Make the RAG good (weeks 7–10)
-21. Eval harness first (20–30 Q/A pairs) — **§7**
-22. Reranking → hybrid search → query rewriting, measuring each — **§7**
+22. Reranking → hybrid search, measuring each against `bun run eval` (the harness and query rewriting are done) — **§7**
 23. Structure-aware chunking + parent-document retrieval — **§7**
 
 ### Phase 4 — Grow (weeks 11+)
@@ -551,13 +532,12 @@ The remaining phases are lower-risk and less order-dependent, so they're listed 
 
 ## 13. Quick reference: dependency actions
 
-All dependencies are on latest as of 2026-07-27 except the three in §5.7, which are blocked. `@base-ui/react` and `lucide-react` are gone (§5.3) — radix plus `@hugeicons` is the pair to build on. `@google/generative-ai` has been replaced by `@google/genai` (§5.1).
+All dependencies are on latest as of 2026-08-18 except `eslint`, which is blocked upstream (§5.7). `@base-ui/react` and `lucide-react` are gone (§5.3) — radix plus `@hugeicons` is the pair to build on. `@google/generative-ai` has been replaced by `@google/genai` (§5.1), and `@sentry/nextjs` is in (§10).
 
 ```bash
-# Add — infrastructure
-bun add @sentry/nextjs                      # error tracking
-bun add react-resizable-panels              # UX
-bun add -d @playwright/test prettier          # `bun test` covers unit tests already
+# Add — remaining wants
+bun add react-resizable-panels              # §9.3 resizable panels
+bun add -d @playwright/test prettier        # `bun test` covers the unit layer already
 
 # Then
 bun outdated && bun update --latest

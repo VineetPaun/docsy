@@ -36,11 +36,12 @@ bunx convex dev      # terminal 1 — backend + codegen. Required; app is non-fu
 bun dev              # terminal 2 — Next.js on :3000
 bunx tsc --noEmit    # typecheck (TypeScript 7 native compiler)
 bun run lint         # ⚠️ CURRENTLY CRASHES — see trap #8
+bun run eval <id>    # retrieval eval against eval/questions.json (AUDIT §7)
 ```
 
 CI (`.github/workflows/ci.yml`) runs `tsc --noEmit`, `eslint` and `bun test` on push and PR — not `next build`, which needs a real Clerk key. **The `eslint` step is red on every push** until trap #8 is resolved; `tsc` and `bun test` are the signal.
 
-`bun test` runs the eight test files that exist (`lib/qdrant.test.ts` — page-number attribution; `lib/file-type.test.ts` — magic-byte sniffing; `lib/rate-limit.test.ts` — fixed-window maths; `lib/embeddings.test.ts` — retry predicate; `lib/openrouter.test.ts` — model catalogue filter; `lib/tts-chunks.test.ts` — narration splitting; `lib/env.test.ts` — the boot-required env check; `lib/prompt-guard.test.ts` — a document cannot escape the source fence). There is **no broader suite**, so passing tests are never evidence a feature works end-to-end.
+`bun test` runs the eleven test files that exist (`lib/qdrant.test.ts` — page-number attribution + retrieval breadth; `lib/file-type.test.ts` — magic-byte sniffing; `lib/rate-limit.test.ts` — fixed-window maths; `lib/embeddings.test.ts` — retry predicate; `lib/openrouter.test.ts` — catalogue filter + provider derivation; `lib/tts-chunks.test.ts` — narration splitting; `lib/env.test.ts` — the boot-required env check; `lib/prompt-guard.test.ts` — a document cannot escape the source fence; `lib/quota.test.ts` — the storage ceiling; `lib/concurrency.test.ts` — the upload pool; `lib/query-rewrite.test.ts` — when a follow-up gets rewritten). Every one covers a *pure function*: nothing tests a route handler or a Convex function, so passing tests are never evidence a feature works end-to-end.
 
 ## ⚠️ Read before writing code
 
@@ -64,7 +65,9 @@ These are the traps that cause agents to do the wrong thing here.
 
 **5c-2. No hyphens in `convex/` filenames.** Convex rejects the whole push, not just the file: `InvalidConfig: lib/rate-limit-window.js is not a valid path to a Convex module`. Path components allow only alphanumerics, underscores and periods, so `convex/` uses camelCase (`rateLimitWindow.ts`) while `lib/` outside it stays kebab-case. Renaming does *not* break `bun test` — the test imports the path directly, not through `api`.
 
-**5d. Uploads are typed by their bytes.** `lib/file-type.ts` `sniffFileType()` decides; `file.type` is browser-supplied and ignored. **Every** upload path — including plain text, which the browser could read locally — must go through `/api/process-document`, because that route is where the sniff happens. Adding a client-side shortcut to "save a round trip" reopens the hole. Both dropzones (`sources-panel.tsx`, `landing/document-dropzone.tsx`) carry near-duplicate copies of `extractTextFromFile`; fix bugs in both.
+**5d. Uploads are typed by their bytes.** `lib/file-type.ts` `sniffFileType()` decides; `file.type` is browser-supplied and ignored. **Every** upload path — including plain text, which the browser could read locally — must go through `/api/process-document`, because that route is where the sniff happens. Adding a client-side shortcut to "save a round trip" reopens the hole. The duplication that used to live here is gone: both dropzones import `extractTextFromFile`, `indexDocument` and the accepted-type map from `lib/source-upload.ts`. Keep it that way — one copy.
+
+**5f. Storage is quota'd, and the counter is incremental.** `users.storageBytes` is maintained by `convex/lib/quota.ts`, not recomputed. Any new path that stores or rewrites source content must call `addStorageBytes` (and `assertStorageHeadroom` before writing), or the quota silently drifts. Size comes from `ctx.db.system.get(storageId)`, never from an argument — a client-declared size is a client-declared quota.
 
 **5e. Four env vars live on the Convex deployment, not in `.env.local`.** `CLERK_JWT_ISSUER_DOMAIN`, `CLERK_WEBHOOK_SECRET`, `QDRANT_URL`, `QDRANT_API_KEY` (`bunx convex env set …`). Each fails silently and differently — `AUDIT.md` §3.1 has the symptom table. The two that bite hardest: no registered Clerk webhook → **no `users` row is ever created, so every mutation throws "User not provisioned"**; no `QDRANT_URL` on Convex → deletes look fine but vectors survive and deleted docs return as ghost citations.
 
@@ -94,8 +97,12 @@ components/
                         `data-horizontal:flex-col`, which out-specifies a plain
                         `md:flex-row` — see the notebook page for the override)
   landing/              marketing page sections
-  sources-panel.tsx     1211 lines; owns upload, web search, URL import, audio
-  notebook-chat.tsx     728 lines; chat + citations + model picker
+  sources/              the sources panel, split (AUDIT §6.2) — sources-panel.tsx
+                        is composition only; one file per concern plus
+                        hooks/use-document-upload.ts (extract → store → index,
+                        3 files in flight) and hooks/use-audio-overview.ts
+  notebook-chat.tsx     728 lines; chat + citations + model picker. The next
+                        file that wants the components/sources/* treatment
 convex/
   auth.config.ts        trusts the Clerk JWT issuer — see trap #1
   http.ts               Clerk webhook (/clerk-webhook) — the ONLY writer of
@@ -106,6 +113,8 @@ convex/
                         through here, or something gets orphaned
   lib/rateLimitWindow.ts    pure window decision, tested from lib/rate-limit.test.ts
                         (camelCase: Convex rejects hyphens in module paths)
+  lib/quota.ts          storage accounting — every path that stores or frees
+                        source content goes through here (trap 5f)
   *.ts                  schema + queries/mutations
 lib/
   api-auth.ts           requireApiAuth() — the 401 guard every route calls
@@ -126,6 +135,12 @@ lib/
   tts-chunks.ts         splitForTts() / concatAudio() — narration is split into
                         ≤5,000-char ElevenLabs requests and the MP3s joined, so
                         a long script is narrated in full
+  source-upload.ts      the one copy of the client ingestion helpers — accepted
+                        types, extractTextFromFile(), indexDocument(). Both
+                        dropzones use it (trap 5d)
+  concurrency.ts        mapWithConcurrency() — bounded parallel uploads
+  query-rewrite.ts      turns "what about the second one?" into a standalone
+                        search query, and only when the question needs it
   convex-error.ts       convexErrorMessage() — a ConvexError's readable text is
                         on `.data`, not `.message`. Use it wherever a cap or
                         quota error reaches a toast
@@ -139,6 +154,8 @@ lib/
                         version in BOTH lib/qdrant.ts and convex/documents.ts
   qdrant.ts             vector store + chunking
 ```
+
+**Observability, both optional and both inert unless keyed:** `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN` (`instrumentation.ts`, `instrumentation-client.ts` — traces, replay and PII deliberately off, because this UI is full of the user's own documents) and `HELICONE_API_KEY`, which swaps OpenRouter's base URL for Helicone's pass-through gateway in `postCompletion`. No wrapper, no dependency, byte-identical requests when unset.
 
 **Data lives in three places:** Convex (metadata + extracted text), Qdrant (vectors), Convex storage (raw files). Deletion is cascaded for you — `convex/lib/cascade.ts` (`purgeDocument` / `purgeNotebook`) covers all three plus messages and audio overviews. **Never delete a document or notebook row directly; call the cascade helper.** Vectors go via a scheduled `internal.documents.purgeVectors` action, because Convex mutations have no network access.
 

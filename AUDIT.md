@@ -320,7 +320,7 @@ Page numbers now work for PDF uploads — `/api/process-document` joins `result.
 
 Failed extraction is now a 422 with a reason ("looks scanned or image-based", "save it as .docx", "no readable text"), surfaced per file in the upload UI. Nothing unreadable reaches Convex or the LLM.
 
-**The deliberate trade-off:** the file is rejected outright rather than stored with `status: "failed"`. Fewer moving parts and better immediate feedback, but a scanned PDF cannot be kept and retried later — which is what OCR support (§11 Tier 3) would want. Revisit together with the per-source status UI in §9.6; doing it now would mean a schema field, a badge and a retry action for a feature that does not exist yet.
+**The deliberate trade-off:** the file is rejected outright rather than stored with `status: "failed"`. Fewer moving parts and better immediate feedback, but a scanned PDF cannot be kept and retried later — which is what OCR support (§11 Tier 3) would want. The per-source status field now exists (`documents.indexStatus`, with a badge that explains itself), so the missing half is smaller than it was: a `status: "failed"` row, a stored file with no text, and a retry action. Still not worth it until OCR is real — a source you can keep but never read is not obviously better than a clear rejection.
 
 ### 4.11 🟡 Dead canvas fields survive in the schema
 

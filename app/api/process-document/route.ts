@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import mammoth from "mammoth";
 import { PDFParse } from "pdf-parse";
-import { requireApiAuth } from "@/lib/api-auth";
+import { ApiError, badRequest, withApiHandler } from "@/lib/api-handler";
 import { sniffFileType } from "@/lib/file-type";
 
 // Matches the "up to 10MB" promise the upload UI makes. The whole file is read
@@ -11,24 +11,17 @@ const MAX_FILE_BYTES = 10 * 1024 * 1024;
 // Parsing a large PDF can outlast the default serverless cutoff.
 export const maxDuration = 120;
 
-export async function POST(request: NextRequest) {
-  // Previously an open door into the PDF parser for anonymous callers.
-  const { errorResponse } = await requireApiAuth();
-  if (errorResponse) return errorResponse;
-
-  try {
+export const POST = withApiHandler(
+  async (request: NextRequest) => {
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
 
     if (!file) {
-      return NextResponse.json({ error: "No file provided" }, { status: 400 });
+      throw badRequest("No file provided");
     }
 
     if (file.size > MAX_FILE_BYTES) {
-      return NextResponse.json(
-        { error: "File is too large. Maximum size is 10MB." },
-        { status: 413 }
-      );
+      throw new ApiError(413, "File is too large. Maximum size is 10MB.");
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
@@ -38,12 +31,8 @@ export async function POST(request: NextRequest) {
     const fileType = sniffFileType(buffer);
 
     if (!fileType) {
-      return NextResponse.json(
-        {
-          error:
-            "Unsupported or unrecognised file. Upload a PDF, DOCX, or text file.",
-        },
-        { status: 400 }
+      throw badRequest(
+        "Unsupported or unrecognised file. Upload a PDF, DOCX, or text file."
       );
     }
 
@@ -100,7 +89,7 @@ export async function POST(request: NextRequest) {
     // The old behaviour stored "[PDF content could not be extracted...]" as the
     // document text and fed it to the LLM as a source (AUDIT.md §4.10).
     if (failure) {
-      return NextResponse.json({ error: failure }, { status: 422 });
+      throw new ApiError(422, failure);
     }
 
     // Clean up the extracted text. The whitespace class deliberately spares
@@ -116,10 +105,7 @@ export async function POST(request: NextRequest) {
     // An empty text file gets the same treatment — a source with no content is
     // not a source.
     if (extractedText.length === 0) {
-      return NextResponse.json(
-        { error: "This file contains no readable text." },
-        { status: 422 }
-      );
+      throw new ApiError(422, "This file contains no readable text.");
     }
 
     // Truncate if too long (to prevent token limits)
@@ -129,17 +115,13 @@ export async function POST(request: NextRequest) {
         extractedText.slice(0, MAX_LENGTH) + "\n\n[Content truncated...]";
     }
 
-    return NextResponse.json({
+    return {
       content: extractedText,
       fileName: file.name,
       // The detected type, not the one the browser claimed.
       fileType,
       characterCount: extractedText.length,
-    });
-  } catch {
-    return NextResponse.json(
-      { error: "Failed to process document" },
-      { status: 500 }
-    );
-  }
-}
+    };
+  },
+  { fallbackMessage: "Failed to process document" }
+);

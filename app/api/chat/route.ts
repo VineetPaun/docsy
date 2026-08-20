@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import {
   modelContextLength,
   resolveModel,
@@ -12,9 +12,13 @@ import {
   type SearchResult,
 } from "@/lib/qdrant";
 import { rewriteQuery } from "@/lib/query-rewrite";
-import { requireApiAuth } from "@/lib/api-auth";
+import {
+  ApiError,
+  badRequest,
+  missingEnv,
+  withApiHandler,
+} from "@/lib/api-handler";
 import { notebookDocuments, requireNotebookOwner } from "@/lib/convex-server";
-import { enforceRateLimit } from "@/lib/rate-limit";
 import { fenceSourceData, SOURCE_DATA_RULE } from "@/lib/prompt-guard";
 
 // Free-tier models on OpenRouter run as low as a 32k context. The system
@@ -70,16 +74,15 @@ function trimHistory(
   return kept;
 }
 
-export async function POST(request: NextRequest) {
-  // Reject anonymous callers — this route proxies a paid LLM gateway.
-  const { errorResponse } = await requireApiAuth();
-  if (errorResponse) return errorResponse;
-
-  // Charged before any embedding or completion is bought.
-  const limited = await enforceRateLimit("chat");
-  if (limited) return limited;
-
-  try {
+/**
+ * Answer a question from one notebook's sources, streamed.
+ *
+ * Auth and the rate limit belong to the wrapper — this route proxies a paid LLM
+ * gateway, and the budget is charged before any embedding or completion is
+ * bought.
+ */
+export const POST = withApiHandler(
+  async (request: NextRequest) => {
     const body: ChatRequest = await request.json();
     const {
       messages,
@@ -93,10 +96,7 @@ export async function POST(request: NextRequest) {
     // to answer from without an id. It used to be optional, which only meant
     // an id-less request got a context-free completion.
     if (!notebookId) {
-      return NextResponse.json(
-        { error: "notebookId is required" },
-        { status: 400 }
-      );
+      throw badRequest("notebookId is required");
     }
 
     // Retrieval below reads whatever notebook the body names, so an unowned
@@ -141,10 +141,7 @@ export async function POST(request: NextRequest) {
         : null;
 
     if (missingVar) {
-      return NextResponse.json(
-        { error: `Chat is unavailable: ${missingVar} is not configured` },
-        { status: 503 }
-      );
+      throw missingEnv(missingVar, "Chat");
     }
 
     let ragResults: SearchResult[] = [];
@@ -173,10 +170,7 @@ export async function POST(request: NextRequest) {
       // answers, and the user cannot tell them apart from the reply. Say the
       // true one: the client renders this as a retryable inline error
       // (AUDIT.md §9.5).
-      return NextResponse.json(
-        { error: "Could not search your sources. Try again." },
-        { status: 502 }
-      );
+      throw new ApiError(502, "Could not search your sources. Try again.");
     }
 
     // Source text is untrusted: fenced, and labelled as data in the rule the
@@ -237,10 +231,7 @@ INSTRUCTIONS:
     // loudly instead — 503, because the service is unconfigured, not the
     // request malformed.
     if (!process.env.OPENROUTER_API_KEY) {
-      return NextResponse.json(
-        { error: "Chat is unavailable: OPENROUTER_API_KEY is not configured" },
-        { status: 503 }
-      );
+      throw missingEnv("OPENROUTER_API_KEY", "Chat");
     }
 
     const chatMessages: ChatMessage[] = [
@@ -302,12 +293,9 @@ INSTRUCTIONS:
         "X-Accel-Buffering": "no",
       },
     });
-  } catch {
-    // Internal error details stay server-side — they leaked upstream API
-    // messages to the client before (AUDIT.md §6.5).
-    return NextResponse.json(
-      { error: "Failed to process chat request" },
-      { status: 500 }
-    );
+  },
+  {
+    rateLimit: "chat",
+    fallbackMessage: "Failed to process chat request",
   }
-}
+);

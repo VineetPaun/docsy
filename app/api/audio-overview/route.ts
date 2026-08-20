@@ -1,16 +1,19 @@
-import { NextRequest, NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import {
   chatWithOpenRouter,
   resolveModel,
   type ChatMessage,
 } from "@/lib/openrouter";
-import { requireApiAuth } from "@/lib/api-auth";
+import {
+  ApiError,
+  badRequest,
+  withApiHandler,
+} from "@/lib/api-handler";
 import {
   authedConvexClient,
   notebookDocuments,
   requireNotebookOwner,
 } from "@/lib/convex-server";
-import { enforceRateLimit } from "@/lib/rate-limit";
 import { fenceSourceData, SOURCE_DATA_RULE } from "@/lib/prompt-guard";
 import { concatAudio, MAX_TTS_CHUNKS, splitForTts } from "@/lib/tts-chunks";
 import { api } from "@/convex/_generated/api";
@@ -280,19 +283,19 @@ async function storeAudio(audio: ArrayBuffer): Promise<string | null> {
 // Script generation plus TTS regularly runs past a minute.
 export const maxDuration = 300;
 
-export async function POST(request: NextRequest) {
-  // This route spends real money per call (OpenRouter + ElevenLabs), so an
-  // anonymous caller was a direct cash-burn vector.
-  const { errorResponse } = await requireApiAuth();
-  if (errorResponse) return errorResponse;
+/**
+ * Generate an audio overview.
+ *
+ * Auth and the rate limit are the wrapper's job — this route spends real money
+ * per call (OpenRouter + ElevenLabs), and `audio` is the tightest of the three
+ * budgets at ~$0.30 of ElevenLabs per request.
+ */
+export const POST = withApiHandler(
+  async (request: NextRequest) => {
+    let reportProgress: Awaited<ReturnType<typeof progressReporter>> | null =
+      null;
 
-  // The tightest budget of the three — ~$0.30 of ElevenLabs per call.
-  const limited = await enforceRateLimit("audio");
-  if (limited) return limited;
-
-  let reportProgress: Awaited<ReturnType<typeof progressReporter>> | null = null;
-
-  try {
+    try {
     const body: AudioOverviewRequest = await request.json();
     const {
       notebookId,
@@ -302,10 +305,7 @@ export async function POST(request: NextRequest) {
     } = body;
 
     if (!notebookId) {
-      return NextResponse.json(
-        { error: "Notebook ID is required" },
-        { status: 400 }
-      );
+      throw badRequest("Notebook ID is required");
     }
 
     // A session only proves the caller is *some* user, and this route writes an
@@ -326,13 +326,9 @@ export async function POST(request: NextRequest) {
       .map((doc) => ({ name: doc.name, content: doc.content ?? "" }));
 
     if (documents.length === 0) {
-      await reportProgress({
-        status: "failed",
-        errorMessage: "No source in this notebook has enough text to narrate",
-      });
-      return NextResponse.json(
-        { error: "No source in this notebook has enough text to narrate" },
-        { status: 400 }
+      // Marked failed by the catch below, with this same message.
+      throw badRequest(
+        "No source in this notebook has enough text to narrate"
       );
     }
 
@@ -378,7 +374,7 @@ export async function POST(request: NextRequest) {
     // Duration must describe what was actually synthesized, not the full
     // script — the two diverge whenever a chunk fails or the script runs past
     // MAX_TTS_CHUNKS, and the UI was reporting the script's length regardless.
-    return NextResponse.json({
+    return {
       success: true,
       notebookId,
       script,
@@ -398,18 +394,26 @@ export async function POST(request: NextRequest) {
       wordCount: countWords(script),
       // ~150 words per minute, measured over the narrated portion only.
       estimatedDuration,
-    });
-  } catch {
-    // Without this the row sits in a non-terminal status until the client's
-    // own catch or the staleness cutoff picks it up.
-    await reportProgress?.({
-      status: "failed",
-      errorMessage: "Failed to generate audio overview",
-    });
+    };
+    } catch (error) {
+      // Without this the row sits in a non-terminal status until the client's
+      // own catch or the staleness cutoff picks it up. The caller-facing
+      // message is reused where there is one, so "no source has enough text"
+      // reaches the panel rather than a generic failure.
+      await reportProgress?.({
+        status: "failed",
+        errorMessage:
+          error instanceof ApiError
+            ? error.message
+            : "Failed to generate audio overview",
+      });
 
-    return NextResponse.json(
-      { error: "Failed to generate audio overview" },
-      { status: 500 }
-    );
+      // Rethrown: the wrapper owns the response envelope and the Sentry report.
+      throw error;
+    }
+  },
+  {
+    rateLimit: "audio",
+    fallbackMessage: "Failed to generate audio overview",
   }
-}
+);

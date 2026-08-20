@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import { generateEmbeddings } from "@/lib/embeddings";
 import {
   storeChunks,
@@ -7,7 +7,7 @@ import {
   type DocumentChunk,
 } from "@/lib/qdrant";
 import { randomUUID } from "crypto";
-import { requireApiAuth } from "@/lib/api-auth";
+import { badRequest, missingEnv, withApiHandler } from "@/lib/api-handler";
 import { requireNotebookOwner } from "@/lib/convex-server";
 
 interface EmbeddingsRequest {
@@ -20,19 +20,14 @@ interface EmbeddingsRequest {
 // A long document fans out into many batched Gemini embedding calls.
 export const maxDuration = 300;
 
-export async function POST(request: NextRequest) {
-  // Anonymous callers could previously poison any notebook's vector index.
-  const { errorResponse } = await requireApiAuth();
-  if (errorResponse) return errorResponse;
-
-  try {
+export const POST = withApiHandler(
+  async (request: NextRequest) => {
     const body: EmbeddingsRequest = await request.json();
     const { documentId, notebookId, content, documentName } = body;
 
     if (!documentId || !notebookId || !content) {
-      return NextResponse.json(
-        { error: "Missing required fields: documentId, notebookId, content" },
-        { status: 400 }
+      throw badRequest(
+        "Missing required fields: documentId, notebookId, content"
       );
     }
 
@@ -40,13 +35,8 @@ export async function POST(request: NextRequest) {
     const notOwner = await requireNotebookOwner(notebookId);
     if (notOwner) return notOwner;
 
-    // Check for API key
-    const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: "GOOGLE_API_KEY or GEMINI_API_KEY not configured" },
-        { status: 500 }
-      );
+    if (!(process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY)) {
+      throw missingEnv("GOOGLE_API_KEY", "Indexing");
     }
 
     // Delete existing chunks for this document (in case of re-processing)
@@ -59,11 +49,7 @@ export async function POST(request: NextRequest) {
     });
 
     if (textChunksWithPositions.length === 0) {
-      return NextResponse.json({
-        success: true,
-        message: "No content to embed",
-        chunksStored: 0,
-      });
+      return { success: true, message: "No content to embed", chunksStored: 0 };
     }
 
     const textChunks = textChunksWithPositions.map((c) => c.text);
@@ -92,18 +78,10 @@ export async function POST(request: NextRequest) {
     // Store in Qdrant
     await storeChunks(chunks, embeddings);
 
-    return NextResponse.json({
-      success: true,
-      chunksStored: chunks.length,
-      documentId,
-    });
-  } catch {
-    return NextResponse.json(
-      { error: "Failed to generate embeddings" },
-      { status: 500 }
-    );
-  }
-}
+    return { success: true, chunksStored: chunks.length, documentId };
+  },
+  { fallbackMessage: "Failed to generate embeddings" }
+);
 
 // There is deliberately no DELETE handler. Vector cleanup is cascaded from the
 // Convex delete mutations via `internal.cleanup.purgeVectors` (AUDIT.md §4.1),

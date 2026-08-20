@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireApiAuth } from "@/lib/api-auth";
+import { ApiError, badRequest, withApiHandler } from "@/lib/api-handler";
 
 interface WebSearchRequest {
   query: string;
@@ -13,20 +13,13 @@ interface SearchResult {
   source?: string;
 }
 
-export async function POST(request: NextRequest) {
-  // Was a free anonymous proxy onto the Tavily/Serper keys.
-  const { errorResponse } = await requireApiAuth();
-  if (errorResponse) return errorResponse;
-
-  try {
+export const POST = withApiHandler(
+  async (request: NextRequest) => {
     const body: WebSearchRequest = await request.json();
     const { query, limit = 5 } = body;
 
     if (!query) {
-      return NextResponse.json(
-        { error: "Missing required field: query" },
-        { status: 400 }
-      );
+      throw badRequest("Missing required field: query");
     }
 
     // Try Tavily first, then Serper
@@ -42,21 +35,14 @@ export async function POST(request: NextRequest) {
 
     // Unconfigured used to return three fabricated example.com results with
     // `success: true`, which no caller distinguished from real ones
-    // (AUDIT.md §6.6).
-    return NextResponse.json(
-      {
-        error:
-          "Web search is unavailable: set TAVILY_API_KEY or SERPER_API_KEY",
-      },
-      { status: 503 }
+    // (AUDIT.md §6.6). Both keys are named because either one works.
+    throw new ApiError(
+      503,
+      "Web search is unavailable: set TAVILY_API_KEY or SERPER_API_KEY"
     );
-  } catch {
-    return NextResponse.json(
-      { error: "Failed to perform web search" },
-      { status: 500 }
-    );
-  }
-}
+  },
+  { fallbackMessage: "Failed to perform web search" }
+);
 
 async function searchWithTavily(
   query: string,

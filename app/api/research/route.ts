@@ -1,7 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import { chatWithOpenRouter, resolveModel, type ModelId } from "@/lib/openrouter";
-import { requireApiAuth } from "@/lib/api-auth";
-import { enforceRateLimit } from "@/lib/rate-limit";
+import { badRequest, missingEnv, withApiHandler } from "@/lib/api-handler";
 import { fenceSourceData, SOURCE_DATA_RULE } from "@/lib/prompt-guard";
 
 interface ResearchRequest {
@@ -19,23 +18,13 @@ interface ResearchSource {
 // Two LLM calls plus a fan-out of web searches; well past the default cutoff.
 export const maxDuration = 300;
 
-export async function POST(request: NextRequest) {
-  // Each call fans out to 3 web searches + 2 LLM calls — expensive to leave open.
-  const { errorResponse } = await requireApiAuth();
-  if (errorResponse) return errorResponse;
-
-  const limited = await enforceRateLimit("research");
-  if (limited) return limited;
-
-  try {
+export const POST = withApiHandler(
+  async (request: NextRequest) => {
     const body: ResearchRequest = await request.json();
     const { topic, depth = "standard", model } = body;
 
     if (!topic) {
-      return NextResponse.json(
-        { error: "Missing required field: topic" },
-        { status: 400 }
-      );
+      throw badRequest("Missing required field: topic");
     }
 
     // Check for required API keys
@@ -46,13 +35,7 @@ export async function POST(request: NextRequest) {
     // Returned a canned "demo report" with a 200 before, so a deploy missing
     // the key produced plausible-looking output (AUDIT.md §6.6).
     if (!openRouterKey) {
-      return NextResponse.json(
-        {
-          error:
-            "Research is unavailable: OPENROUTER_API_KEY is not configured",
-        },
-        { status: 503 }
-      );
+      throw missingEnv("OPENROUTER_API_KEY", "Research");
     }
 
     // Step 1: Generate search queries based on the topic
@@ -112,20 +95,18 @@ export async function POST(request: NextRequest) {
       selectedModel
     );
 
-    return NextResponse.json({
+    return {
       success: true,
       topic,
       report,
       sources: allSources.slice(0, 10),
       searchQueries,
-    });
-  } catch {
-    return NextResponse.json(
-      { error: "Failed to perform research" },
-      { status: 500 }
-    );
-  }
-}
+    };
+  },
+  // Each call fans out to 3 web searches + 2 LLM calls, so the budget is spent
+  // before the first of them.
+  { rateLimit: "research", fallbackMessage: "Failed to perform research" }
+);
 
 async function generateSearchQueries(
   topic: string,

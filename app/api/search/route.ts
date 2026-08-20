@@ -1,7 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import { generateEmbedding } from "@/lib/embeddings";
 import { searchChunks } from "@/lib/qdrant";
-import { requireApiAuth } from "@/lib/api-auth";
+import {
+  badRequest,
+  missingEnv,
+  withApiHandler,
+} from "@/lib/api-handler";
 import { requireNotebookOwner } from "@/lib/convex-server";
 
 interface SearchRequest {
@@ -11,44 +15,31 @@ interface SearchRequest {
   limit?: number;
 }
 
-export async function POST(request: NextRequest) {
-  const { errorResponse } = await requireApiAuth();
-  if (errorResponse) return errorResponse;
-
-  try {
+export const POST = withApiHandler(
+  async (request: NextRequest) => {
     const body: SearchRequest = await request.json();
     const { query, notebookId, documentIds, limit = 10 } = body;
 
     if (!query || !notebookId) {
-      return NextResponse.json(
-        { error: "Missing required fields: query, notebookId" },
-        { status: 400 }
-      );
+      throw badRequest("Missing required fields: query, notebookId");
     }
 
     // A session alone would let any user search another user's notebook.
     const notOwner = await requireNotebookOwner(notebookId);
     if (notOwner) return notOwner;
 
-    // Check for API key
-    const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: "GOOGLE_API_KEY or GEMINI_API_KEY not configured" },
-        { status: 500 }
-      );
+    if (!(process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY)) {
+      throw missingEnv("GOOGLE_API_KEY", "Search");
     }
 
-    // Generate embedding for the query
     const queryEmbedding = await generateEmbedding(query);
 
-    // Search for similar chunks
     const results = await searchChunks(queryEmbedding, notebookId, {
       limit,
       documentIds,
     });
 
-    return NextResponse.json({
+    return {
       success: true,
       results: results.map((r) => ({
         id: r.id,
@@ -59,11 +50,7 @@ export async function POST(request: NextRequest) {
         chunkIndex: r.metadata?.chunkIndex,
       })),
       query,
-    });
-  } catch {
-    return NextResponse.json(
-      { error: "Failed to perform search" },
-      { status: 500 }
-    );
-  }
-}
+    };
+  },
+  { fallbackMessage: "Failed to perform search" }
+);

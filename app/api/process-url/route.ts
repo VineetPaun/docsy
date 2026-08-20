@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as cheerio from "cheerio";
 import TurndownService from "turndown";
-import { requireApiAuth } from "@/lib/api-auth";
+import { badRequest, withApiHandler } from "@/lib/api-handler";
 import {
   assertPublicUrl,
   BlockedUrlError,
@@ -272,17 +272,13 @@ async function processYouTube(
   };
 }
 
-export async function POST(request: NextRequest) {
-  // Unauthenticated, this route was an internal-network scanner (AUDIT.md §3.3).
-  const { errorResponse } = await requireApiAuth();
-  if (errorResponse) return errorResponse;
-
-  try {
+export const POST = withApiHandler(
+  async (request: NextRequest) => {
     const body: ProcessUrlRequest = await request.json();
     const { url } = body;
 
     if (!url) {
-      return NextResponse.json({ error: "URL is required" }, { status: 400 });
+      throw badRequest("URL is required");
     }
 
     // Reject non-http(s) schemes and private/loopback/link-local targets
@@ -297,22 +293,19 @@ export async function POST(request: NextRequest) {
       ? await processYouTube(url, videoId)
       : await processWebpage(url);
 
-    return NextResponse.json({
+    return {
       success: true,
       ...result,
       url,
       characterCount: result.content.length,
-    });
-  } catch (error) {
-    // Blocked URLs are the caller's fault — tell them why. Everything else
-    // gets a generic message so internal details stay server-side.
-    if (error instanceof BlockedUrlError) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
-    }
-
-    return NextResponse.json(
-      { error: "Failed to process URL" },
-      { status: 500 }
-    );
+    };
+  },
+  {
+    fallbackMessage: "Failed to process URL",
+    // A blocked URL is the one internal error worth showing verbatim: the
+    // reason is about the address the caller sent, so a generic 500 would hide
+    // information they need. Everything else keeps its detail server-side.
+    expose: (error) =>
+      error instanceof BlockedUrlError ? badRequest(error.message) : null,
   }
-}
+);

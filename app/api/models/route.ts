@@ -1,5 +1,4 @@
-import { NextResponse } from "next/server";
-import { requireApiAuth } from "@/lib/api-auth";
+import { withApiHandler } from "@/lib/api-handler";
 import { fetchModelCatalogue } from "@/lib/openrouter";
 
 /**
@@ -10,9 +9,6 @@ import { fetchModelCatalogue } from "@/lib/openrouter";
  * OpenRouter. `fetchModelCatalogue()` caches for an hour and never throws, so
  * this route is cheap and always answers.
  */
-export async function GET() {
-  const { errorResponse } = await requireApiAuth();
-  if (errorResponse) return errorResponse;
-
-  return NextResponse.json({ models: await fetchModelCatalogue() });
-}
+export const GET = withApiHandler(async () => ({
+  models: await fetchModelCatalogue(),
+}));

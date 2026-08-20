@@ -4,11 +4,14 @@ The doing list. Only open work lives here: a finished item is deleted, not
 ticked. The record of what has already landed, with the reasoning, is the
 changelog at the top of [AUDIT.md](AUDIT.md) — this file does not duplicate it.
 
-**Where things stand.** Every Phase 0 and Phase 1 _code_ item is written and
-committed: Convex auth off the Clerk JWT, per-route ownership checks, rate
-limits, a byte quota, cascade deletes, magic-byte typing, streamed answers,
-source fencing, sorted indexes, the split sources panel, an eval harness, and
-Sentry + Helicone. `bunx tsc --noEmit` clean, `bun test` 65/65.
+**Where things stand.** Every Phase 0, Phase 1 and Phase 2 _code_ item is
+written and committed: Convex auth off the Clerk JWT, per-route ownership behind
+one wrapper, rate limits, a byte quota, cascade deletes, magic-byte typing,
+streamed answers, source fencing, sorted indexes, embedding and prompt caching,
+every god component split, Server-Component auth shells, a draggable split, a
+pinned SSRF connection, an eval harness, Sentry + Helicone, and route, cascade
+and end-to-end tests. `bunx tsc --noEmit` clean, `bun test` 88/88, prettier
+enforced.
 
 ⚠️ **`bun run lint` cannot run** — TypeScript 7 ships no compiler API for
 `typescript-eslint@8`, so CI's eslint step is red on every push. Accepted, not a
@@ -148,7 +151,25 @@ Every one of these was written by reading, never by looking.
 - [ ] Run `axe` over the notebook page and the dashboard, and read one answer
       with a screen reader
 
-## 7. Observability, if keyed
+## 7. The 2026-08-20 batch
+
+- [ ] **Every route still answers.** The nine handlers moved onto one wrapper:
+      upload a file, import a URL, run a web search, send a chat message,
+      generate an overview. A wrong `expose` or a swallowed `Response` shows up
+      as a 500 where a 400 used to be
+- [ ] **A blocked URL still explains itself** — paste `http://127.0.0.1:6333` as
+      a source: a 400 saying the host is not allowed, not a generic failure
+- [ ] **Sign out and hit `/dashboard` directly** — a redirect to sign-in with no
+      flash of the app shell, which is what the Server Component shells buy
+- [ ] **Drag the split** on the notebook page, reload, and confirm the width
+      survived. Then narrow the window past `md` and back
+- [ ] **Ask the same question twice** — the second answer should skip the
+      embedding call (watch Helicone, or the latency). With an Anthropic model,
+      the second request should report cached input tokens
+- [ ] `bun run e2e` once, with the app booted: the landing specs should pass
+      without credentials
+
+## 8. Observability, if keyed
 
 - [ ] With `SENTRY_DSN` set, throw from a route and confirm the event arrives
       (and that no document text rides along with it)
@@ -169,20 +190,16 @@ Every one of these was written by reading, never by looking.
 
 ## Code still owed, after the runtime checks pass
 
-Ordered by ratio of value to effort. Detail for each is in [AUDIT.md](AUDIT.md).
+Short list now. Detail for each is in [AUDIT.md](AUDIT.md).
 
-1. **Embedding + prompt caching** (§8) — identical questions re-embed and re-infer every time. Content-hash the embedding cache; turn on OpenRouter prompt caching for the system prompt
-2. **One error envelope for the API** (§6.5) — every route hand-rolls its own shape (`{error}` vs `{success:false,error}`). One `withApiHandler`, generic message out, detail to logs. Keep `/api/process-url`'s `BlockedUrlError` as the deliberate exception
-3. **Split `notebook-chat.tsx` and `app/dashboard/page.tsx`** (§6.2) — the same treatment `sources-panel.tsx` got
-4. **Dashboard responsive pass** (§9.1) — 408 lines that have never been looked at below `md`
-5. **Server-Component auth shells** (§6.7) — the notebook and dashboard pages gate on `useUser()` in render, which ships the page before the check and costs a loading flash
-6. **Route-handler and Convex-function tests, then Playwright** (§10) — all 65 cases cover pure functions; nothing covers a handler
-7. **Resizable panels** (§9.3) — the 40/60 split is fixed at `max-w-[480px]`
-8. **`prettier`** (§10) and a **`CONTRIBUTING.md`**
-9. **Sentry source maps** (§10) — `withSentryConfig` is not wrapped around `next.config.ts`, so traces stay minified. Needs a real org + auth token
-10. **DNS-rebinding pinning in `lib/url-guard.ts`** (§3.6) — resolve-then-`fetch` re-resolves; closing it needs a custom agent that pins the validated IP
+1. **`next build` and the Playwright landing spec in CI** (§10) — both need a real `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` as a repo secret. One secret unblocks both
+2. **Move document text out of the row** (§8) — `content` is stored inline and Convex caps a document at 1 MB. Keep metadata plus a snippet in the row, the full text in storage
+3. **An `axe` and screen-reader pass** (§9.4) — the accessibility work was written by reading and has never been observed
+4. **Convex function tests** (§10) — the helpers are covered; no registered mutation is. Needs `convex-test`, which is vitest-only, so it costs a second runner. Worth it when a mutation's own logic outgrows its helpers
 
 **Waiting on evidence, deliberately not built** — each is documented with its trigger, so don't build one without it: durable audio generation (§4.2, needs real strandings), a `vectorPurgeQueue` cron (§4.1, needs real orphans), the canvas-field migration (§4.11, do it when the schema is touched anyway), OCR + keeping a rejected scan (§4.10), DOCX page attribution (§4.9).
+
+**Blocked upstream:** `eslint` 10 and a `typescript-eslint` that supports TypeScript 7 (§5.7). Until then `bun run lint` cannot run at all and CI's lint step is `continue-on-error`.
 
 **After reranking and hybrid search:** structure-aware chunking, parent-document retrieval, multi-query and HyDE (§7). Injection mitigations 2–5 stay in ROADMAP §3.4 and only start mattering when the model gets tools.
 

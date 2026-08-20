@@ -15,7 +15,9 @@
  * `Cosine` distance normalises on upsert, so nothing normalises them here.
  */
 
+import { createHash } from "node:crypto";
 import { GoogleGenAI } from "@google/genai";
+import { createLruCache } from "./lru";
 
 const EMBEDDING_MODEL = "gemini-embedding-001";
 const EMBEDDING_DIMENSION = 768;
@@ -29,6 +31,35 @@ type TaskType = "RETRIEVAL_DOCUMENT" | "RETRIEVAL_QUERY";
 const MAX_INPUT_CHARS = 10_000;
 const BATCH_SIZE = 10;
 const MAX_ATTEMPTS = 4;
+
+/**
+ * Identical text embeds to an identical vector, and this app re-embeds the same
+ * text constantly: the same question asked twice, the same source re-indexed,
+ * the same boilerplate chunk appearing in every document of a set (AUDIT.md §8).
+ * Each of those is a paid API call and ~300ms of latency for a value we already
+ * had.
+ *
+ * ponytail: process-local and bounded, not Convex-backed. A serverless instance
+ * serves many requests before it is recycled, which is where the repeats are;
+ * persisting vectors to survive a cold start would cost a database round trip to
+ * save an API call, and 768 floats is 6 KB a row.
+ */
+const EMBEDDING_CACHE_ENTRIES = 500;
+const embeddingCache = createLruCache<number[]>(EMBEDDING_CACHE_ENTRIES);
+
+/**
+ * Cache key for one embedding.
+ *
+ * Hashed rather than keyed by the text itself, so the cache holds 32 bytes per
+ * key instead of up to 10,000. The task type is part of the key because the
+ * same sentence embedded as a document and as a query is deliberately two
+ * different vectors.
+ *
+ * Exported for `lib/embeddings.test.ts`.
+ */
+export function embeddingCacheKey(text: string, taskType: string): string {
+  return `${taskType}:${createHash("sha256").update(text).digest("hex")}`;
+}
 
 let client: GoogleGenAI | null = null;
 
@@ -62,15 +93,50 @@ export function isRetryableEmbeddingError(error: unknown): boolean {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * One `embedContent` call for a whole batch, retried with exponential backoff.
- * A single un-retried 429 used to fail an entire document's ingestion.
+ * Embed a batch, serving what the cache already holds.
+ *
+ * The cache is checked here rather than in `generateEmbedding` so both the
+ * query path and the document path get it.
  */
 async function embedBatch(
   texts: string[],
   taskType: TaskType
 ): Promise<number[][]> {
+  const prepared = texts.map((text) => text.slice(0, MAX_INPUT_CHARS).trim());
+
+  // Only the misses are sent. Positions are tracked so the returned vectors go
+  // back in the caller's order — a batch that silently reorders would attach
+  // every chunk's vector to the wrong chunk.
+  const results = new Array<number[]>(prepared.length);
+  const missing: { index: number; text: string }[] = [];
+
+  prepared.forEach((text, index) => {
+    const cached = embeddingCache.get(embeddingCacheKey(text, taskType));
+    if (cached) results[index] = cached;
+    else missing.push({ index, text });
+  });
+
+  if (missing.length === 0) return results;
+
+  const fresh = await embedUncached(
+    missing.map((entry) => entry.text),
+    taskType
+  );
+
+  missing.forEach((entry, i) => {
+    results[entry.index] = fresh[i];
+    embeddingCache.set(embeddingCacheKey(entry.text, taskType), fresh[i]);
+  });
+
+  return results;
+}
+
+/** The API call itself: one `embedContent` for the batch, retried on 429/5xx. */
+async function embedUncached(
+  contents: string[],
+  taskType: TaskType
+): Promise<number[][]> {
   const ai = getClient();
-  const contents = texts.map((text) => text.slice(0, MAX_INPUT_CHARS).trim());
 
   for (let attempt = 1; ; attempt++) {
     try {

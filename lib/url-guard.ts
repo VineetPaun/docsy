@@ -9,16 +9,19 @@
  * Protections applied here:
  *  - protocol allowlist (http/https only)
  *  - DNS resolution + private/loopback/link-local/reserved address blocking
- *  - redirects followed manually so every hop is re-validated
+ *  - **the validated address is pinned for the connection**, so the name cannot
+ *    resolve to something else between the check and the connect (DNS
+ *    rebinding). This is why the fetch goes through `node:https` rather than
+ *    `fetch`: `lookup` is the only hook that decides where the socket lands,
+ *    and `fetch` has no equivalent
+ *  - redirects followed manually so every hop is re-validated and re-pinned
  *  - request timeout
  *  - response size cap (Content-Length *and* streamed byte count)
  *  - response Content-Type allowlist
- *
- * Known limitation: a DNS rebinding attack can still return a public address
- * at validation time and a private one at connect time. Closing that needs a
- * custom agent that pins the validated IP; documented rather than solved.
  */
 
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest, type RequestOptions } from "node:https";
 import { lookup } from "node:dns/promises";
 
 /** Thrown for any URL we refuse to fetch. Callers map this to a 400. */
@@ -86,13 +89,19 @@ function isPrivateIPv6(address: string): boolean {
 }
 
 /**
- * Validate a user-supplied URL and confirm every address its hostname
- * resolves to is publicly routable.
+ * Validate a user-supplied URL and return it alongside the address the
+ * connection must use.
+ *
+ * The returned address is the one the caller has to connect to. Resolving
+ * again at connect time is the rebinding hole: the second lookup can answer
+ * with 169.254.169.254 after the first answered with a public address.
  *
  * @throws {BlockedUrlError} on a bad scheme, unresolvable host, or any
  *   resolved address in private/reserved space.
  */
-export async function assertPublicUrl(rawUrl: string): Promise<URL> {
+async function resolvePublicUrl(
+  rawUrl: string
+): Promise<{ url: URL; address: string; family: number }> {
   let parsed: URL;
   try {
     parsed = new URL(rawUrl);
@@ -129,7 +138,18 @@ export async function assertPublicUrl(rawUrl: string): Promise<URL> {
     }
   }
 
-  return parsed;
+  return { url: parsed, address: addresses[0].address, family: addresses[0].family };
+}
+
+/**
+ * Validate a user-supplied URL, throwing if it is not safe to fetch.
+ *
+ * Kept for callers that only need the check (`/api/process-url` validates a
+ * YouTube thumbnail URL it never fetches server-side).
+ */
+export async function assertPublicUrl(rawUrl: string): Promise<URL> {
+  const { url } = await resolvePublicUrl(rawUrl);
+  return url;
 }
 
 export interface SafeFetchOptions {
@@ -143,10 +163,143 @@ export interface SafeFetchOptions {
   timeoutMs?: number;
 }
 
+/** One request to one pinned address, with the body read under a cap. */
+interface PinnedResponse {
+  status: number;
+  location: string | null;
+  contentType: string;
+  text: string;
+}
+
 /**
- * Fetch a user-supplied URL as text with SSRF, timeout, size and content-type
- * protections. Redirects are followed manually so each hop is re-validated —
- * a public URL that 302s to 169.254.169.254 is rejected at the second hop.
+ * Perform a single GET against a **specific IP**, using the URL's hostname for
+ * TLS and the `Host` header.
+ *
+ * `fetch` cannot express this: it resolves the name itself, at connect time,
+ * with no hook in between — which is precisely the window a rebinding attack
+ * needs. `node:https` takes a `lookup`, so the socket lands on the address that
+ * was validated and nothing else.
+ *
+ * A redirect returns without reading the body: the destination still has to be
+ * re-validated and re-pinned before anything is downloaded from it.
+ */
+function fetchPinned(
+  url: URL,
+  address: string,
+  family: number,
+  options: {
+    headers: Record<string, string>;
+    allowedContentTypes?: string[];
+    maxBytes: number;
+    timeoutMs: number;
+  }
+): Promise<PinnedResponse> {
+  const isHttps = url.protocol === "https:";
+  const send = isHttps ? httpsRequest : httpRequest;
+
+  return new Promise((resolve, reject) => {
+    const requestOptions: RequestOptions = {
+      protocol: url.protocol,
+      hostname: url.hostname,
+      port: url.port || (isHttps ? 443 : 80),
+      path: `${url.pathname}${url.search}`,
+      method: "GET",
+      headers: { ...options.headers, host: url.host },
+      // The pin. Node calls this instead of DNS, so the connection cannot be
+      // redirected to an address that was never checked.
+      lookup: (hostname, lookupOptions, callback) => {
+        if (lookupOptions && (lookupOptions as { all?: boolean }).all) {
+          (callback as unknown as (
+            err: null,
+            addresses: { address: string; family: number }[]
+          ) => void)(null, [{ address, family }]);
+        } else {
+          callback(null, address, family);
+        }
+      },
+      // Certificate and SNI still belong to the hostname, not the IP, so a
+      // pinned connection is not a downgraded one.
+      servername: isHttps ? url.hostname : undefined,
+    };
+
+    const request = send(requestOptions, (response) => {
+      const status = response.statusCode ?? 0;
+      const contentType = String(response.headers["content-type"] ?? "");
+
+      if (status >= 300 && status < 400) {
+        response.destroy();
+        resolve({
+          status,
+          location: (response.headers.location as string) ?? null,
+          contentType,
+          text: "",
+        });
+        return;
+      }
+
+      if (options.allowedContentTypes?.length) {
+        const bare = contentType.split(";")[0].trim().toLowerCase();
+        const allowed = options.allowedContentTypes.some((prefix) =>
+          bare.startsWith(prefix.toLowerCase())
+        );
+        if (!allowed) {
+          response.destroy();
+          reject(
+            new BlockedUrlError(`Unsupported content type: ${bare || "unknown"}`)
+          );
+          return;
+        }
+      }
+
+      // Advisory, but free to check before downloading anything.
+      const declared = Number(response.headers["content-length"]);
+      if (Number.isFinite(declared) && declared > options.maxBytes) {
+        response.destroy();
+        reject(new Error("Response too large"));
+        return;
+      }
+
+      const chunks: Buffer[] = [];
+      let received = 0;
+
+      response.on("data", (chunk: Buffer) => {
+        received += chunk.byteLength;
+        // Counted as it arrives: Content-Length can understate the real body.
+        if (received > options.maxBytes) {
+          response.destroy();
+          request.destroy();
+          reject(new Error("Response too large"));
+          return;
+        }
+        chunks.push(chunk);
+      });
+
+      response.on("end", () =>
+        resolve({
+          status,
+          location: null,
+          contentType,
+          text: Buffer.concat(chunks).toString("utf8"),
+        })
+      );
+
+      response.on("error", reject);
+    });
+
+    request.setTimeout(options.timeoutMs, () => {
+      request.destroy(new Error("Request timed out"));
+    });
+
+    request.on("error", reject);
+    request.end();
+  });
+}
+
+/**
+ * Fetch a user-supplied URL as text with SSRF, rebinding, timeout, size and
+ * content-type protections. Redirects are followed manually so every hop is
+ * re-validated — a public URL that 302s to 169.254.169.254 is rejected at the
+ * second hop, and each hop connects to the address that hop validated.
  *
  * @returns the response body plus the final URL actually fetched.
  * @throws {BlockedUrlError} if any hop fails validation.
@@ -164,94 +317,32 @@ export async function safeFetchText(
   } = options;
 
   let currentUrl = rawUrl;
-  let response: Response | undefined;
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    const validated = await assertPublicUrl(currentUrl);
+    const { url, address, family } = await resolvePublicUrl(currentUrl);
 
-    response = await fetch(validated.toString(), {
+    const response = await fetchPinned(url, address, family, {
       headers,
-      redirect: "manual", // resolve hops ourselves so each one is validated
-      signal: AbortSignal.timeout(timeoutMs),
+      allowedContentTypes,
+      maxBytes,
+      timeoutMs,
     });
 
-    // 3xx with a Location header — validate the next hop and continue.
-    if (response.status >= 300 && response.status < 400) {
-      const location = response.headers.get("location");
-      if (!location) break;
-
-      // Drain the redirect body so the socket can be reused.
-      await response.body?.cancel();
-      currentUrl = new URL(location, validated).toString();
+    if (response.status >= 300 && response.status < 400 && response.location) {
+      currentUrl = new URL(response.location, url).toString();
       continue;
     }
 
-    break;
-  }
-
-  if (!response) {
-    throw new Error("Failed to fetch URL");
-  }
-
-  if (response.status >= 300 && response.status < 400) {
-    throw new Error("Too many redirects");
-  }
-
-  if (!response.ok) {
-    await response.body?.cancel();
-    throw new Error(
-      `Failed to fetch URL: ${response.status} ${response.statusText}`
-    );
-  }
-
-  const contentType = response.headers.get("content-type") ?? "";
-
-  if (allowedContentTypes && allowedContentTypes.length > 0) {
-    const bare = contentType.split(";")[0].trim().toLowerCase();
-    const allowed = allowedContentTypes.some((prefix) =>
-      bare.startsWith(prefix.toLowerCase())
-    );
-    if (!allowed) {
-      await response.body?.cancel();
-      throw new BlockedUrlError(`Unsupported content type: ${bare || "unknown"}`);
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(`Failed to fetch URL: ${response.status}`);
     }
+
+    return {
+      url: currentUrl,
+      text: response.text,
+      contentType: response.contentType,
+    };
   }
 
-  // Trust Content-Length when present, but still count bytes as we read —
-  // the header is advisory and can understate the real body size.
-  const declaredLength = Number(response.headers.get("content-length"));
-  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
-    await response.body?.cancel();
-    throw new Error("Response too large");
-  }
-
-  const reader = response.body?.getReader();
-  if (!reader) return { url: currentUrl, text: "", contentType };
-
-  const chunks: Uint8Array[] = [];
-  let received = 0;
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    received += value.byteLength;
-    if (received > maxBytes) {
-      await reader.cancel();
-      throw new Error("Response too large");
-    }
-    chunks.push(value);
-  }
-
-  const buffer = new Uint8Array(received);
-  let offset = 0;
-  for (const chunk of chunks) {
-    buffer.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-
-  return {
-    url: currentUrl,
-    text: new TextDecoder().decode(buffer),
-    contentType,
-  };
+  throw new Error("Too many redirects");
 }

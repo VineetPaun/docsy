@@ -8,6 +8,8 @@ import { expect, test } from "bun:test";
 import {
   DEFAULT_MODEL,
   getModelsByProvider,
+  withPromptCaching,
+  type ChatMessage,
   providerInfo,
   isOfferedModel,
   parseStreamLine,
@@ -165,4 +167,45 @@ test("default model never falls to a paid model unless nothing is free", () => {
   // An empty catalogue is the fetch having failed; the hardcoded slug is the
   // last resort, not the usual path.
   expect(pickDefaultModel([])).toBe(DEFAULT_MODEL);
+});
+
+/**
+ * Prompt caching (AUDIT.md §8).
+ *
+ * The failure mode is asymmetric: a missing breakpoint costs money quietly,
+ * while sending Anthropic's block shape to a provider that does not understand
+ * it is a 400 on every chat request.
+ */
+
+const longSystemPrompt = "x".repeat(5_000);
+
+test("marks a long system prompt cacheable for Anthropic models", () => {
+  const [system] = withPromptCaching(
+    [
+      { role: "system", content: longSystemPrompt },
+      { role: "user", content: "hi" },
+    ],
+    "anthropic/claude-sonnet-4.5"
+  ) as { content: { cache_control?: unknown }[] }[];
+
+  expect(system.content[0].cache_control).toEqual({ type: "ephemeral" });
+});
+
+test("leaves other providers' messages exactly as they were", () => {
+  const messages: ChatMessage[] = [
+    { role: "system", content: longSystemPrompt },
+    { role: "user", content: "hi" },
+  ];
+
+  expect(withPromptCaching(messages, "google/gemma-4-31b-it:free")).toBe(
+    messages
+  );
+});
+
+test("does not mark a system prompt too short to cache", () => {
+  const messages: ChatMessage[] = [{ role: "system", content: "short" }];
+
+  expect(withPromptCaching(messages, "anthropic/claude-opus-4.5")).toEqual(
+    messages
+  );
 });

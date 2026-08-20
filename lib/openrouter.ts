@@ -299,6 +299,50 @@ export interface ChatMessage {
   content: string;
 }
 
+/**
+ * Anthropic charges a fraction of the input price for a cached prefix, but only
+ * when a `cache_control` breakpoint marks one, and only above ~1,024 tokens
+ * (AUDIT.md §8). Docsy's system prompt is the retrieved passages — the largest
+ * and most repeated part of every request in a conversation.
+ *
+ * OpenAI and Google cache long prefixes automatically, so they need no marker;
+ * sending them Anthropic's block shape would be a malformed request, which is
+ * why this only fires for `anthropic/*`.
+ */
+const MIN_CACHEABLE_PROMPT_CHARS = 4_000;
+
+/**
+ * Mark the system prompt as cacheable where the provider supports it.
+ *
+ * Returns the messages untouched for every other provider — including on a
+ * short prompt, where a breakpoint is a no-op that Anthropic may reject.
+ *
+ * Exported for `lib/openrouter.test.ts`.
+ */
+export function withPromptCaching(
+  messages: ChatMessage[],
+  model: ModelId
+): unknown[] {
+  if (!model.startsWith("anthropic/")) return messages;
+
+  return messages.map((message, index) =>
+    index === 0 &&
+    message.role === "system" &&
+    message.content.length >= MIN_CACHEABLE_PROMPT_CHARS
+      ? {
+          role: message.role,
+          content: [
+            {
+              type: "text",
+              text: message.content,
+              cache_control: { type: "ephemeral" },
+            },
+          ],
+        }
+      : message
+  );
+}
+
 export interface OpenRouterResponse {
   id: string;
   choices: {
@@ -377,7 +421,7 @@ async function postCompletion(
       },
       body: JSON.stringify({
         model: validModel,
-        messages,
+        messages: withPromptCaching(messages, validModel),
         temperature: options?.temperature ?? 0.7,
         max_tokens: options?.maxTokens ?? 2000,
         ...(stream ? { stream: true } : {}),

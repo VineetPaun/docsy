@@ -114,8 +114,8 @@ export function SourceList({
         </div>
         <h3 className="mt-4 font-medium">Saved sources will appear here</h3>
         <p className="mt-1 text-sm text-muted-foreground">
-          Upload a PDF, DOCX or text file, paste a link, or search the web to add
-          your first source.
+          Upload a PDF, DOCX or text file, paste a link, or search the web to
+          add your first source.
         </p>
       </div>
     );

@@ -19,7 +19,7 @@ import {
 
 /** Only the fields the quota reads; the rest of the row is irrelevant here. */
 const userWith = (storageBytes?: number) =>
-  ({ storageBytes } as unknown as Doc<"users">);
+  ({ storageBytes }) as unknown as Doc<"users">;
 
 /** Stands in for `ctx.db.system.get`, which returns `_storage` metadata. */
 const ctxWithFileSize = (size: number | null) =>

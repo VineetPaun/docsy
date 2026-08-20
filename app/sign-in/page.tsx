@@ -43,7 +43,9 @@ export default function SignInPage() {
       }
     } catch (err: unknown) {
       const error = err as { errors?: { message: string }[] };
-      setError(error.errors?.[0]?.message || "An error occurred during sign in");
+      setError(
+        error.errors?.[0]?.message || "An error occurred during sign in"
+      );
     } finally {
       setIsLoading(false);
     }

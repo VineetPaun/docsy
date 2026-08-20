@@ -34,9 +34,7 @@ export const getMessages = query({
     // taking the *oldest* 200 would pin a long conversation to its opening.
     const recent = await ctx.db
       .query("messages")
-      .withIndex("by_notebook_time", (q) =>
-        q.eq("notebookId", args.notebookId)
-      )
+      .withIndex("by_notebook_time", (q) => q.eq("notebookId", args.notebookId))
       .order("desc")
       .take(MAX_TRANSCRIPT_MESSAGES);
 

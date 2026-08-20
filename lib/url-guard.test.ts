@@ -38,9 +38,9 @@ test("rejects loopback and private space", async () => {
 
 test("rejects the cloud metadata endpoint", async () => {
   // The one that leaks instance credentials.
-  expect(await blocked("http://169.254.169.254/latest/meta-data/")).toBeInstanceOf(
-    BlockedUrlError
-  );
+  expect(
+    await blocked("http://169.254.169.254/latest/meta-data/")
+  ).toBeInstanceOf(BlockedUrlError);
 });
 
 test("rejects IPv6 loopback and unique-local", async () => {

@@ -126,13 +126,13 @@ export const listUnread = query({
       userId: v.string(),
       message: v.string(),
       read: v.boolean(),
-    }),
+    })
   ),
   handler: async (ctx, args) => {
     return await ctx.db
       .query("notifications")
       .withIndex("by_user_read", (q) =>
-        q.eq("userId", args.userId).eq("read", false),
+        q.eq("userId", args.userId).eq("read", false)
       )
       .collect();
   },

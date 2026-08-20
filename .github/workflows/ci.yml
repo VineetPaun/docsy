@@ -29,8 +29,16 @@ jobs:
       - name: Typecheck
         run: bunx tsc --noEmit
 
+      - name: Format check
+        run: bun run format:check
+
+      # ⚠️ Red on every run: typescript-eslint@8 requires the JS compiler API,
+      # which TypeScript 7 does not ship (CLAUDE.md trap 8). Kept so the failure
+      # stays visible rather than forgotten; `continue-on-error` lets the rest of
+      # the job report honestly. Drop the flag the day the peer range clears.
       - name: Lint
         run: bun run lint
+        continue-on-error: true
 
       # convex/_generated is committed, so this needs no Convex deployment.
       - name: Unit tests

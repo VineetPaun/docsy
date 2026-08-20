@@ -236,7 +236,11 @@ export default function AudioPlayer({
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-blue-500 rounded-lg flex items-center justify-center">
-            <HugeiconsIcon icon={VolumeHighIcon} strokeWidth={2} className="w-5 h-5 text-white" />
+            <HugeiconsIcon
+              icon={VolumeHighIcon}
+              strokeWidth={2}
+              className="w-5 h-5 text-white"
+            />
           </div>
           <div>
             <h3 className="font-semibold text-sm">{title}</h3>
@@ -276,7 +280,11 @@ export default function AudioPlayer({
               disabled={!audioSource}
               className="h-8 w-8"
             >
-              <HugeiconsIcon icon={DownloadIcon} strokeWidth={2} className="w-4 h-4" />
+              <HugeiconsIcon
+                icon={DownloadIcon}
+                strokeWidth={2}
+                className="w-4 h-4"
+              />
             </Button>
           )}
         </div>
@@ -327,7 +335,11 @@ export default function AudioPlayer({
               className="h-8 w-8"
               disabled={!audioSource}
             >
-              <HugeiconsIcon icon={RotateLeft02Icon} strokeWidth={2} className="w-4 h-4" />
+              <HugeiconsIcon
+                icon={RotateLeft02Icon}
+                strokeWidth={2}
+                className="w-4 h-4"
+              />
             </Button>
 
             {/* Play/Pause */}
@@ -340,9 +352,17 @@ export default function AudioPlayer({
               disabled={!audioSource || isGenerating}
             >
               {isPlaying ? (
-                <HugeiconsIcon icon={PauseIcon} strokeWidth={2} className="w-5 h-5 text-white" />
+                <HugeiconsIcon
+                  icon={PauseIcon}
+                  strokeWidth={2}
+                  className="w-5 h-5 text-white"
+                />
               ) : (
-                <HugeiconsIcon icon={PlayIcon} strokeWidth={2} className="w-5 h-5 text-white ml-0.5" />
+                <HugeiconsIcon
+                  icon={PlayIcon}
+                  strokeWidth={2}
+                  className="w-5 h-5 text-white ml-0.5"
+                />
               )}
             </Button>
 
@@ -356,9 +376,17 @@ export default function AudioPlayer({
               disabled={!audioSource}
             >
               {isMuted ? (
-                <HugeiconsIcon icon={VolumeOffIcon} strokeWidth={2} className="w-4 h-4" />
+                <HugeiconsIcon
+                  icon={VolumeOffIcon}
+                  strokeWidth={2}
+                  className="w-4 h-4"
+                />
               ) : (
-                <HugeiconsIcon icon={VolumeHighIcon} strokeWidth={2} className="w-4 h-4" />
+                <HugeiconsIcon
+                  icon={VolumeHighIcon}
+                  strokeWidth={2}
+                  className="w-4 h-4"
+                />
               )}
             </Button>
           </div>
@@ -386,9 +414,17 @@ export default function AudioPlayer({
               >
                 Transcript
                 {showTranscript ? (
-                  <HugeiconsIcon icon={ArrowUp01Icon} strokeWidth={2} className="w-3 h-3 ml-1" />
+                  <HugeiconsIcon
+                    icon={ArrowUp01Icon}
+                    strokeWidth={2}
+                    className="w-3 h-3 ml-1"
+                  />
                 ) : (
-                  <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={2} className="w-3 h-3 ml-1" />
+                  <HugeiconsIcon
+                    icon={ArrowDown01Icon}
+                    strokeWidth={2}
+                    className="w-3 h-3 ml-1"
+                  />
                 )}
               </Button>
             )}
@@ -407,9 +443,17 @@ export default function AudioPlayer({
           >
             {showTranscript ? "Hide" : "View"} Script
             {showTranscript ? (
-              <HugeiconsIcon icon={ArrowUp01Icon} strokeWidth={2} className="w-3 h-3 ml-1" />
+              <HugeiconsIcon
+                icon={ArrowUp01Icon}
+                strokeWidth={2}
+                className="w-3 h-3 ml-1"
+              />
             ) : (
-              <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={2} className="w-3 h-3 ml-1" />
+              <HugeiconsIcon
+                icon={ArrowDown01Icon}
+                strokeWidth={2}
+                className="w-3 h-3 ml-1"
+              />
             )}
           </Button>
         </div>

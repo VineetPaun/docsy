@@ -57,7 +57,12 @@ export function NotebookChat({
     failure,
     send,
     retry,
-  } = useChat({ notebookId, notebookTitle, selectedDocs, model: selectedModel });
+  } = useChat({
+    notebookId,
+    notebookTitle,
+    selectedDocs,
+    model: selectedModel,
+  });
 
   // Load the saved model preference. No client-side validity check — the
   // catalogue is fetched rather than imported, and `/api/chat` resolves an

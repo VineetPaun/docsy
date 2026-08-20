@@ -146,7 +146,7 @@ defineTable({ team: v.id("teams"), user: v.id("users") })
 // Good: single compound index serves both query patterns
 defineTable({ team: v.id("teams"), user: v.id("users") }).index(
   "by_team_and_user",
-  ["team", "user"],
+  ["team", "user"]
 );
 ```
 

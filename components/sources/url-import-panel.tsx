@@ -37,7 +37,10 @@ export function UrlImportPanel({
   const setIndexStatus = useMutation(api.documents.setIndexStatus);
 
   // The parent disables Upload while a URL is in flight and vice versa.
-  React.useEffect(() => onBusyChange(isProcessing), [isProcessing, onBusyChange]);
+  React.useEffect(
+    () => onBusyChange(isProcessing),
+    [isProcessing, onBusyChange]
+  );
 
   const handleAddUrl = async () => {
     if (!urlInput.trim()) return;

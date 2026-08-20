@@ -59,7 +59,9 @@ export function NotebookWorkspace({ notebookId }: { notebookId: string }) {
 
   // Which sources are checked. Owned here because the panel renders the
   // checkboxes and the chat sends the ids to /api/chat. Empty = all sources.
-  const [selectedDocs, setSelectedDocs] = React.useState<Set<string>>(new Set());
+  const [selectedDocs, setSelectedDocs] = React.useState<Set<string>>(
+    new Set()
+  );
 
   const [previewDocument, setPreviewDocument] =
     React.useState<SourceDocument | null>(null);

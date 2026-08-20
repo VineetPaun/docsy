@@ -54,7 +54,9 @@ test.describe("notebook", () => {
 
     // Streamed, so the assertion waits on the finished bubble rather than a
     // single response.
-    const citation = page.getByRole("button", { name: /open the cited passage/i });
+    const citation = page.getByRole("button", {
+      name: /open the cited passage/i,
+    });
     await expect(citation.first()).toBeVisible({ timeout: 120_000 });
 
     await citation.first().click();

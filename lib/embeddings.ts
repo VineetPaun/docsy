@@ -181,7 +181,10 @@ export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
 
   for (let i = 0; i < texts.length; i += BATCH_SIZE) {
     embeddings.push(
-      ...(await embedBatch(texts.slice(i, i + BATCH_SIZE), "RETRIEVAL_DOCUMENT"))
+      ...(await embedBatch(
+        texts.slice(i, i + BATCH_SIZE),
+        "RETRIEVAL_DOCUMENT"
+      ))
     );
   }
 

@@ -134,7 +134,9 @@ export const POST = withApiHandler(
     // pipeline look like a working one. So a missing retrieval key is a 503
     // naming the variable — the same treatment OPENROUTER_API_KEY gets below —
     // rather than a silent downgrade to ungrounded answers.
-    const missingVar = !(process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY)
+    const missingVar = !(
+      process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY
+    )
       ? "GOOGLE_API_KEY"
       : !process.env.QDRANT_URL
         ? "QDRANT_URL"
@@ -248,7 +250,8 @@ INSTRUCTIONS:
     // the last — the client can render the source header while the answer is
     // still being written (AUDIT.md §8).
     const encoder = new TextEncoder();
-    const line = (value: unknown) => encoder.encode(`${JSON.stringify(value)}\n`);
+    const line = (value: unknown) =>
+      encoder.encode(`${JSON.stringify(value)}\n`);
 
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {

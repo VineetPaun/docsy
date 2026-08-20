@@ -60,7 +60,9 @@ export const claimWebhookEvent = internalMutation({
     // instead of blowing one mutation's read limit.
     const stale = await ctx.db
       .query("webhookEvents")
-      .withIndex("by_seen_at", (q) => q.lt("seenAt", now - WEBHOOK_EVENT_TTL_MS))
+      .withIndex("by_seen_at", (q) =>
+        q.lt("seenAt", now - WEBHOOK_EVENT_TTL_MS)
+      )
       .take(WEBHOOK_PRUNE_BATCH);
 
     for (const row of stale) {
@@ -140,11 +142,7 @@ export const upsertFromClerk = internalMutation({
  */
 export const consumeRateLimit = mutation({
   args: {
-    key: v.union(
-      v.literal("chat"),
-      v.literal("research"),
-      v.literal("audio")
-    ),
+    key: v.union(v.literal("chat"), v.literal("research"), v.literal("audio")),
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);

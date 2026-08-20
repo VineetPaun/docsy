@@ -1,11 +1,7 @@
 import type { NextRequest } from "next/server";
 import { generateEmbedding } from "@/lib/embeddings";
 import { searchChunks } from "@/lib/qdrant";
-import {
-  badRequest,
-  missingEnv,
-  withApiHandler,
-} from "@/lib/api-handler";
+import { badRequest, missingEnv, withApiHandler } from "@/lib/api-handler";
 import { requireNotebookOwner } from "@/lib/convex-server";
 
 interface SearchRequest {

@@ -133,10 +133,14 @@ test("skips lines with no usable text", () => {
 
   // Role-only opening chunk, and an empty delta.
   expect(
-    parseStreamLine(`data: ${JSON.stringify({ choices: [{ delta: { role: "assistant" } }] })}`)
+    parseStreamLine(
+      `data: ${JSON.stringify({ choices: [{ delta: { role: "assistant" } }] })}`
+    )
   ).toBeNull();
   expect(
-    parseStreamLine(`data: ${JSON.stringify({ choices: [{ delta: { content: "" } }] })}`)
+    parseStreamLine(
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "" } }] })}`
+    )
   ).toBeNull();
 });
 

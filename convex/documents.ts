@@ -373,10 +373,14 @@ export const purgeVectors = internalAction({
         );
       }
 
-      await ctx.scheduler.runAfter(delay * 1000, internal.documents.purgeVectors, {
-        ...args,
-        attempt: attempt + 1,
-      });
+      await ctx.scheduler.runAfter(
+        delay * 1000,
+        internal.documents.purgeVectors,
+        {
+          ...args,
+          attempt: attempt + 1,
+        }
+      );
 
       throw new Error(
         `Qdrant purge for ${key}=${value} failed (attempt ${attempt + 1}): ${reason}. Retrying in ${delay}s.`

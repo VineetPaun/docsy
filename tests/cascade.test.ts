@@ -126,14 +126,7 @@ test("deleting a notebook takes its documents, audio, messages and vectors", asy
 
   // Messages and audio overviews are only reachable by notebook, so anything
   // missed here is unreachable forever.
-  expect(deleted).toEqual([
-    "doc1",
-    "doc2",
-    "audio1",
-    "msg1",
-    "msg2",
-    "nb1",
-  ]);
+  expect(deleted).toEqual(["doc1", "doc2", "audio1", "msg1", "msg2", "nb1"]);
   expect(filesDeleted).toEqual(["file1", "file2", "mp3"]);
 
   // One filter delete for the notebook, not one per document.

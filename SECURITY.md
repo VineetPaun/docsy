@@ -20,7 +20,7 @@ there is no bounty and no SLA beyond that.
 
 In scope: authentication and authorisation on `app/api/*` and `convex/*`,
 cross-account data access, SSRF through user-supplied URLs, prompt injection
-that changes what the server *does* (rather than what the model says), and
+that changes what the server _does_ (rather than what the model says), and
 secret exposure.
 
 Out of scope: rate limits being tunable, an LLM producing a wrong or

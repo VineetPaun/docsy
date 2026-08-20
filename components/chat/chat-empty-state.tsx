@@ -45,7 +45,9 @@ export function ChatEmptyState({
             <line x1="12" y1="3" x2="12" y2="15" />
           </svg>
         </div>
-        <h3 className="mt-4 text-lg font-medium">Add a source to get started</h3>
+        <h3 className="mt-4 text-lg font-medium">
+          Add a source to get started
+        </h3>
         <p className="mt-2 max-w-sm text-sm text-muted-foreground">
           Upload a PDF, DOCX or text file, paste a link, or search the web.
           Answers come only from what is in this notebook.

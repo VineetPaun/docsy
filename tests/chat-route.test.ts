@@ -25,7 +25,9 @@ const jsonRequest = (body: unknown) =>
 const validBody = {
   notebookId: "nb1",
   notebookTitle: "Research",
-  messages: [{ role: "user", content: "What does the report say about costs?" }],
+  messages: [
+    { role: "user", content: "What does the report say about costs?" },
+  ],
 };
 
 /** The dependencies the route reaches for, with everything set to succeed. */

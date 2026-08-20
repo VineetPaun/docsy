@@ -159,7 +159,7 @@ const profile = useQuery(api.users.getProfile, { userId: selectedId! });
 // Good: skip when there is nothing to fetch
 const profile = useQuery(
   api.users.getProfile,
-  selectedId ? { userId: selectedId } : "skip",
+  selectedId ? { userId: selectedId } : "skip"
 );
 ```
 

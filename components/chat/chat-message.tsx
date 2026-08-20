@@ -68,7 +68,9 @@ export function ChatMessageBubble({
     <div className={`flex gap-3 ${isUser ? "justify-end" : ""}`}>
       {!isUser && <AssistantAvatar />}
 
-      <div className={`max-w-[85%] sm:max-w-[80%] ${isUser ? "order-first" : ""}`}>
+      <div
+        className={`max-w-[85%] sm:max-w-[80%] ${isUser ? "order-first" : ""}`}
+      >
         <div
           className={`rounded-2xl px-4 py-2.5 ${
             isUser

@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "eval": "bun run scripts/eval-retrieval.ts",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "dependencies": {
     "@clerk/nextjs": "^7.7.1",
@@ -47,6 +49,7 @@
     "@types/turndown": "^5.0.6",
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.3.0",
+    "prettier": "^3.9.6",
     "shadcn": "^4.16.2",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2"

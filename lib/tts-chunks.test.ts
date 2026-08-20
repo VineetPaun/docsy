@@ -65,7 +65,10 @@ test("cuts mid-word only for a single word longer than the limit", () => {
 
 test("packs whole sentences rather than one chunk each", () => {
   // Three 14-char sentences, 30-char limit: two fit together, then the third.
-  const chunks = splitForTts("Aaa bbb ccc d. Eee fff ggg h. Iii jjj kkk l.", 30);
+  const chunks = splitForTts(
+    "Aaa bbb ccc d. Eee fff ggg h. Iii jjj kkk l.",
+    30
+  );
   expect(chunks).toEqual(["Aaa bbb ccc d. Eee fff ggg h.", "Iii jjj kkk l."]);
 });
 
@@ -73,7 +76,7 @@ test("concatAudio joins segments in order", () => {
   const a = new Uint8Array([1, 2, 3]);
   const b = new Uint8Array([4, 5]);
 
-  expect(Array.from(new Uint8Array(concatAudio([a.buffer, b.buffer])))).toEqual([
-    1, 2, 3, 4, 5,
-  ]);
+  expect(Array.from(new Uint8Array(concatAudio([a.buffer, b.buffer])))).toEqual(
+    [1, 2, 3, 4, 5]
+  );
 });

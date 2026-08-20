@@ -21,9 +21,9 @@ test("a complete environment reports nothing missing", () => {
 });
 
 test("an absent variable is reported", () => {
-  expect(missingRequiredEnv({ ...complete, CLERK_SECRET_KEY: undefined })).toEqual(
-    ["CLERK_SECRET_KEY"]
-  );
+  expect(
+    missingRequiredEnv({ ...complete, CLERK_SECRET_KEY: undefined })
+  ).toEqual(["CLERK_SECRET_KEY"]);
 });
 
 test("a blank or whitespace value counts as absent", () => {

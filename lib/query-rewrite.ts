@@ -56,10 +56,7 @@ export function needsRewrite(question: string, hasHistory: boolean): boolean {
  *
  * Exported for `lib/query-rewrite.test.ts`.
  */
-export function sanitiseRewrite(
-  rewritten: string,
-  original: string
-): string {
+export function sanitiseRewrite(rewritten: string, original: string): string {
   const first = rewritten.trim().split("\n")[0]?.trim() ?? "";
 
   // Models like to answer with `Standalone question: …`.

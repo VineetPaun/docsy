@@ -377,7 +377,7 @@ async function postCompletion(
   messages: ChatMessage[],
   model: ModelId,
   options: CompletionOptions | undefined,
-  stream: boolean,
+  stream: boolean
 ): Promise<Response> {
   const apiKey = process.env.OPENROUTER_API_KEY;
 
@@ -399,35 +399,32 @@ async function postCompletion(
     ? "https://openrouter.helicone.ai/api/v1/chat/completions"
     : "https://openrouter.ai/api/v1/chat/completions";
 
-  const response = await fetch(
-    endpoint,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-        "HTTP-Referer":
-          process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
-        "X-Title": "Docsy - Document Chat",
-        ...(heliconeKey
-          ? {
-              "Helicone-Auth": `Bearer ${heliconeKey}`,
-              // Enough to split cost by model and by streaming vs buffered
-              // without sending anything about the user or their documents.
-              "Helicone-Property-Model": validModel,
-              "Helicone-Property-Mode": stream ? "stream" : "buffered",
-            }
-          : {}),
-      },
-      body: JSON.stringify({
-        model: validModel,
-        messages: withPromptCaching(messages, validModel),
-        temperature: options?.temperature ?? 0.7,
-        max_tokens: options?.maxTokens ?? 2000,
-        ...(stream ? { stream: true } : {}),
-      }),
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+      "HTTP-Referer":
+        process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
+      "X-Title": "Docsy - Document Chat",
+      ...(heliconeKey
+        ? {
+            "Helicone-Auth": `Bearer ${heliconeKey}`,
+            // Enough to split cost by model and by streaming vs buffered
+            // without sending anything about the user or their documents.
+            "Helicone-Property-Model": validModel,
+            "Helicone-Property-Mode": stream ? "stream" : "buffered",
+          }
+        : {}),
     },
-  );
+    body: JSON.stringify({
+      model: validModel,
+      messages: withPromptCaching(messages, validModel),
+      temperature: options?.temperature ?? 0.7,
+      max_tokens: options?.maxTokens ?? 2000,
+      ...(stream ? { stream: true } : {}),
+    }),
+  });
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -437,7 +434,7 @@ async function postCompletion(
       const errorMessage =
         errorJson.error?.message || errorJson.message || errorText;
       throw new Error(
-        `OpenRouter API error (${response.status}): ${errorMessage}`,
+        `OpenRouter API error (${response.status}): ${errorMessage}`
       );
     } catch (parseError) {
       if (
@@ -447,7 +444,7 @@ async function postCompletion(
         throw parseError;
       }
       throw new Error(
-        `OpenRouter API error (${response.status}): ${errorText.slice(0, 200)}`,
+        `OpenRouter API error (${response.status}): ${errorText.slice(0, 200)}`
       );
     }
   }
@@ -494,7 +491,7 @@ export function parseStreamLine(line: string): string | "done" | null {
 export async function* streamChatWithOpenRouter(
   messages: ChatMessage[],
   model: ModelId = DEFAULT_MODEL,
-  options?: CompletionOptions,
+  options?: CompletionOptions
 ): AsyncGenerator<string> {
   const response = await postCompletion(messages, model, options, true);
 
@@ -528,7 +525,7 @@ export async function* streamChatWithOpenRouter(
 export async function chatWithOpenRouter(
   messages: ChatMessage[],
   model: ModelId = DEFAULT_MODEL,
-  options?: CompletionOptions,
+  options?: CompletionOptions
 ): Promise<string> {
   const response = await postCompletion(messages, model, options, false);
 
@@ -542,12 +539,12 @@ export async function chatWithOpenRouter(
   ) {
     if (data?.error) {
       throw new Error(
-        `OpenRouter error: ${data.error.message || JSON.stringify(data.error)}`,
+        `OpenRouter error: ${data.error.message || JSON.stringify(data.error)}`
       );
     }
 
     throw new Error(
-      "OpenRouter returned an invalid response. The model may be unavailable or rate-limited. Please try again.",
+      "OpenRouter returned an invalid response. The model may be unavailable or rate-limited. Please try again."
     );
   }
 

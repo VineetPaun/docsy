@@ -254,7 +254,10 @@ export function chunkTextWithPositions(
   // rescanning the whole pageBreaks array for every chunk.
   let pageCursor = 0;
   const getPageNumber = (charIndex: number): number => {
-    while (pageCursor < pageBreaks.length && charIndex > pageBreaks[pageCursor]) {
+    while (
+      pageCursor < pageBreaks.length &&
+      charIndex > pageBreaks[pageCursor]
+    ) {
       pageCursor++;
     }
     return pageCursor + 1;

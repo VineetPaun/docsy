@@ -4,11 +4,7 @@ import {
   resolveModel,
   type ChatMessage,
 } from "@/lib/openrouter";
-import {
-  ApiError,
-  badRequest,
-  withApiHandler,
-} from "@/lib/api-handler";
+import { ApiError, badRequest, withApiHandler } from "@/lib/api-handler";
 import {
   authedConvexClient,
   notebookDocuments,
@@ -55,7 +51,9 @@ async function generatePodcastScript(
   // the user's ear as if the app had written it (ROADMAP.md §3.4).
   const documentContext = fenceSourceData(
     documents
-      .map((doc) => `=== ${doc.name} ===\n${doc.content?.slice(0, 10000) || ""}`)
+      .map(
+        (doc) => `=== ${doc.name} ===\n${doc.content?.slice(0, 10000) || ""}`
+      )
       .join("\n\n---\n\n")
   );
 
@@ -103,14 +101,10 @@ Remember to:
 
   // Was pinned to `meta-llama/llama-3.3-70b-instruct:free`, a slug OpenRouter
   // has since retired — every audio overview failed on it (AUDIT.md §5.6).
-  const script = await chatWithOpenRouter(
-    messages,
-    await resolveModel(),
-    {
-      temperature: 0.8,
-      maxTokens: 4000,
-    }
-  );
+  const script = await chatWithOpenRouter(messages, await resolveModel(), {
+    temperature: 0.8,
+    maxTokens: 4000,
+  });
 
   return script;
 }
@@ -296,105 +290,105 @@ export const POST = withApiHandler(
       null;
 
     try {
-    const body: AudioOverviewRequest = await request.json();
-    const {
-      notebookId,
-      notebookTitle,
-      duration = "medium",
-      overviewId,
-    } = body;
+      const body: AudioOverviewRequest = await request.json();
+      const {
+        notebookId,
+        notebookTitle,
+        duration = "medium",
+        overviewId,
+      } = body;
 
-    if (!notebookId) {
-      throw badRequest("Notebook ID is required");
-    }
+      if (!notebookId) {
+        throw badRequest("Notebook ID is required");
+      }
 
-    // A session only proves the caller is *some* user, and this route writes an
-    // overview row under the notebook it is handed (AUDIT.md §4.7).
-    const notOwner = await requireNotebookOwner(notebookId);
-    if (notOwner) return notOwner;
+      // A session only proves the caller is *some* user, and this route writes an
+      // overview row under the notebook it is handed (AUDIT.md §4.7).
+      const notOwner = await requireNotebookOwner(notebookId);
+      if (notOwner) return notOwner;
 
-    // Only after ownership is established — otherwise a caller could write
-    // status into a row it does not own, and the mutation would reject it
-    // anyway.
-    reportProgress = await progressReporter(overviewId);
+      // Only after ownership is established — otherwise a caller could write
+      // status into a row it does not own, and the mutation would reject it
+      // anyway.
+      reportProgress = await progressReporter(overviewId);
 
-    // Source text is read from Convex, never taken from the request body — the
-    // client used to post every document's full content, which meant the route
-    // narrated whatever the caller supplied under any notebook id it liked.
-    const documents = (await notebookDocuments(notebookId))
-      .filter((doc) => (doc.content?.length ?? 0) > MIN_CONTENT_CHARS)
-      .map((doc) => ({ name: doc.name, content: doc.content ?? "" }));
+      // Source text is read from Convex, never taken from the request body — the
+      // client used to post every document's full content, which meant the route
+      // narrated whatever the caller supplied under any notebook id it liked.
+      const documents = (await notebookDocuments(notebookId))
+        .filter((doc) => (doc.content?.length ?? 0) > MIN_CONTENT_CHARS)
+        .map((doc) => ({ name: doc.name, content: doc.content ?? "" }));
 
-    if (documents.length === 0) {
-      // Marked failed by the catch below, with this same message.
-      throw badRequest(
-        "No source in this notebook has enough text to narrate"
+      if (documents.length === 0) {
+        // Marked failed by the catch below, with this same message.
+        throw badRequest(
+          "No source in this notebook has enough text to narrate"
+        );
+      }
+
+      // Step 1: Generate the podcast script
+      await reportProgress({ status: "generating_script" });
+      const script = await generatePodcastScript(
+        notebookTitle,
+        documents,
+        duration
       );
-    }
 
-    // Step 1: Generate the podcast script
-    await reportProgress({ status: "generating_script" });
-    const script = await generatePodcastScript(
-      notebookTitle,
-      documents,
-      duration
-    );
+      // Step 2: Synthesize audio with ElevenLabs. The whole script is narrated
+      // now — one request per 5,000-char chunk, concatenated (AUDIT.md §4.3).
+      const narrationText = toNarrationText(script);
 
-    // Step 2: Synthesize audio with ElevenLabs. The whole script is narrated
-    // now — one request per 5,000-char chunk, concatenated (AUDIT.md §4.3).
-    const narrationText = toNarrationText(script);
+      // The script is worth persisting before synthesis: TTS is the slow, paid,
+      // failure-prone half, and a script the user can read beats nothing.
+      await reportProgress({ status: "synthesizing", scriptText: script });
 
-    // The script is worth persisting before synthesis: TTS is the slow, paid,
-    // failure-prone half, and a script the user can read beats nothing.
-    await reportProgress({ status: "synthesizing", scriptText: script });
+      const { audio, spokenWords, truncated } =
+        await synthesizeWithElevenLabs(narrationText);
 
-    const { audio, spokenWords, truncated } =
-      await synthesizeWithElevenLabs(narrationText);
+      // Step 3: Store the MP3 and return only its id. Returning base64 meant a
+      // ~4 MB JSON body — at or over Vercel's 4.5 MB response limit — and the
+      // audio was lost on refresh because nothing ever persisted it. AUDIT.md
+      // §4.2.
+      const storageId = audio ? await storeAudio(audio) : null;
 
-    // Step 3: Store the MP3 and return only its id. Returning base64 meant a
-    // ~4 MB JSON body — at or over Vercel's 4.5 MB response limit — and the
-    // audio was lost on refresh because nothing ever persisted it. AUDIT.md
-    // §4.2.
-    const storageId = audio ? await storeAudio(audio) : null;
+      const estimatedDuration = Math.max(1, Math.round(spokenWords / 150));
 
-    const estimatedDuration = Math.max(1, Math.round(spokenWords / 150));
+      // Terminal state. `script_only` is not a failure — the script is usable,
+      // there is just no MP3 (no ElevenLabs key, or synthesis failed).
+      await reportProgress({
+        status: storageId ? "ready" : "script_only",
+        scriptText: script,
+        audioStorageId: storageId ?? undefined,
+        duration: estimatedDuration,
+        errorMessage: truncated
+          ? "Narration stops short of the full script"
+          : undefined,
+      });
 
-    // Terminal state. `script_only` is not a failure — the script is usable,
-    // there is just no MP3 (no ElevenLabs key, or synthesis failed).
-    await reportProgress({
-      status: storageId ? "ready" : "script_only",
-      scriptText: script,
-      audioStorageId: storageId ?? undefined,
-      duration: estimatedDuration,
-      errorMessage: truncated
-        ? "Narration stops short of the full script"
-        : undefined,
-    });
-
-    // Duration must describe what was actually synthesized, not the full
-    // script — the two diverge whenever a chunk fails or the script runs past
-    // MAX_TTS_CHUNKS, and the UI was reporting the script's length regardless.
-    return {
-      success: true,
-      notebookId,
-      script,
-      audio: storageId
-        ? {
-            storageId,
-            format: "mp3",
-            available: true,
-            truncated,
-          }
-        : {
-            available: false,
-            message: audio
-              ? "Audio was generated but could not be saved"
-              : "Audio synthesis failed",
-          },
-      wordCount: countWords(script),
-      // ~150 words per minute, measured over the narrated portion only.
-      estimatedDuration,
-    };
+      // Duration must describe what was actually synthesized, not the full
+      // script — the two diverge whenever a chunk fails or the script runs past
+      // MAX_TTS_CHUNKS, and the UI was reporting the script's length regardless.
+      return {
+        success: true,
+        notebookId,
+        script,
+        audio: storageId
+          ? {
+              storageId,
+              format: "mp3",
+              available: true,
+              truncated,
+            }
+          : {
+              available: false,
+              message: audio
+                ? "Audio was generated but could not be saved"
+                : "Audio synthesis failed",
+            },
+        wordCount: countWords(script),
+        // ~150 words per minute, measured over the narrated portion only.
+        estimatedDuration,
+      };
     } catch (error) {
       // Without this the row sits in a non-terminal status until the client's
       // own catch or the staleness cutoff picks it up. The caller-facing

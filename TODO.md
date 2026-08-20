@@ -4,7 +4,7 @@ The doing list. Only open work lives here: a finished item is deleted, not
 ticked. The record of what has already landed, with the reasoning, is the
 changelog at the top of [AUDIT.md](AUDIT.md) — this file does not duplicate it.
 
-**Where things stand.** Every Phase 0 and Phase 1 *code* item is written and
+**Where things stand.** Every Phase 0 and Phase 1 _code_ item is written and
 committed: Convex auth off the Clerk JWT, per-route ownership checks, rate
 limits, a byte quota, cascade deletes, magic-byte typing, streamed answers,
 source fencing, sorted indexes, the split sources panel, an eval harness, and
@@ -20,7 +20,7 @@ silent:
 
 - no registered Clerk webhook → no `users` row is ever created, so every
   mutation throws "User not provisioned" and new signups cannot use the app
-- no `QDRANT_URL` on the *Convex deployment* → deletes look fine, vectors
+- no `QDRANT_URL` on the _Convex deployment_ → deletes look fine, vectors
   survive, and deleted documents come back as citations
 
 ⚠️ **Chat hard-depends on a working Qdrant + embeddings pair.** The raw-text
@@ -74,7 +74,7 @@ does not mean the endpoint is registered.
       document and check the point count in **`docsy_documents_v2`** directly.
       ⚠️ The collection is versioned, so anything indexed before the swap
       retrieves nothing until re-uploaded; and with the fallback deleted, a dead
-      pipeline answers "not in your sources" to *everything* — identical to an
+      pipeline answers "not in your sources" to _everything_ — identical to an
       irrelevant question. Check Qdrant, not the chat output
 - [ ] Ask a question a source clearly answers → citations render. Ask one
       nothing covers → "not in your sources", no invented answer
@@ -82,7 +82,7 @@ does not mean the endpoint is registered.
       retryable inline alert, not a silent ungrounded reply
 - [ ] Ask a **context-dependent follow-up** ("what about the second one?") and
       confirm the answer is about the right thing. That path buys an extra
-      completion, so also confirm a self-contained question does *not* trigger it
+      completion, so also confirm a self-contained question does _not_ trigger it
 - [ ] Watch an answer **stream in** — token by token, source header before the
       first token, and the finished message survives a refresh
 - [ ] Send a message with `OPENROUTER_API_KEY` unset: the question stays in the
@@ -101,8 +101,7 @@ does not mean the endpoint is registered.
 - [ ] Drop 6 files at once: three upload in flight at a time, the button counts
       finished-of-total, and one deliberately corrupt file does not stop the
       other five
-- [ ] Upload a source and check `users.storageBytes` moved by roughly file size
-      + text length, then delete it and watch it come back down. Lower
+- [ ] Upload a source and check `users.storageBytes` moved by roughly file size + text length, then delete it and watch it come back down. Lower
       `MAX_STORAGE_BYTES_PER_USER` temporarily and confirm the refusal reads as
       a quota message rather than a generic failure
 - [ ] Create 26 notebooks — the 26th is refused with a readable toast

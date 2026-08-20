@@ -38,7 +38,9 @@ export function CitationTooltip({
       const rect = triggerRef.current.getBoundingClientRect();
       const spaceAbove = rect.top;
       const spaceBelow = window.innerHeight - rect.bottom;
-      setPosition(spaceAbove > spaceBelow && spaceAbove > 200 ? "top" : "bottom");
+      setPosition(
+        spaceAbove > spaceBelow && spaceAbove > 200 ? "top" : "bottom"
+      );
     }
     setIsVisible(true);
   };

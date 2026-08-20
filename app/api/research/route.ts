@@ -1,5 +1,9 @@
 import type { NextRequest } from "next/server";
-import { chatWithOpenRouter, resolveModel, type ModelId } from "@/lib/openrouter";
+import {
+  chatWithOpenRouter,
+  resolveModel,
+  type ModelId,
+} from "@/lib/openrouter";
 import { badRequest, missingEnv, withApiHandler } from "@/lib/api-handler";
 import { fenceSourceData, SOURCE_DATA_RULE } from "@/lib/prompt-guard";
 
@@ -42,7 +46,11 @@ export const POST = withApiHandler(
     // One resolve for both calls — see lib/openrouter.ts.
     const selectedModel = await resolveModel(model);
 
-    const searchQueries = await generateSearchQueries(topic, depth, selectedModel);
+    const searchQueries = await generateSearchQueries(
+      topic,
+      depth,
+      selectedModel
+    );
 
     // Step 2: Perform web searches
     const allSources: ResearchSource[] = [];

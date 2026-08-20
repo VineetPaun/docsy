@@ -195,8 +195,7 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
     };
   }, []);
 
-  const selectedModel =
-    models.find((model) => model.id === value) ?? models[0];
+  const selectedModel = models.find((model) => model.id === value) ?? models[0];
 
   // A retired id — or one left in localStorage from a previous catalogue — used
   // to render as `models[0]` while the request still carried the dead slug, so
@@ -214,7 +213,7 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
   // Get providers that have models
   const availableProviders = React.useMemo(() => {
     return (Object.keys(modelsByProvider) as Provider[]).filter(
-      (p) => modelsByProvider[p].length > 0,
+      (p) => modelsByProvider[p].length > 0
     );
   }, [modelsByProvider]);
 
@@ -223,7 +222,7 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
     // `?? []` because a provider can vanish when the catalogue refreshes while
     // its sidebar filter is still selected.
     let visible = selectedProvider
-      ? modelsByProvider[selectedProvider] ?? []
+      ? (modelsByProvider[selectedProvider] ?? [])
       : models;
 
     if (searchQuery) {
@@ -231,7 +230,7 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
       visible = visible.filter(
         (m) =>
           m.name.toLowerCase().includes(query) ||
-          m.description.toLowerCase().includes(query),
+          m.description.toLowerCase().includes(query)
       );
     }
 

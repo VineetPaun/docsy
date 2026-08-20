@@ -69,16 +69,14 @@ async function searchWithTavily(
 
   const data = await response.json();
 
-  const results: SearchResult[] = data.results.map((r: {
-    title: string;
-    url: string;
-    content: string;
-  }) => ({
-    title: r.title,
-    url: r.url,
-    snippet: r.content,
-    source: new URL(r.url).hostname,
-  }));
+  const results: SearchResult[] = data.results.map(
+    (r: { title: string; url: string; content: string }) => ({
+      title: r.title,
+      url: r.url,
+      snippet: r.content,
+      source: new URL(r.url).hostname,
+    })
+  );
 
   return NextResponse.json({
     success: true,
@@ -111,16 +109,14 @@ async function searchWithSerper(
 
   const data = await response.json();
 
-  const results: SearchResult[] = (data.organic || []).map((r: {
-    title: string;
-    link: string;
-    snippet: string;
-  }) => ({
-    title: r.title,
-    url: r.link,
-    snippet: r.snippet,
-    source: new URL(r.link).hostname,
-  }));
+  const results: SearchResult[] = (data.organic || []).map(
+    (r: { title: string; link: string; snippet: string }) => ({
+      title: r.title,
+      url: r.link,
+      snippet: r.snippet,
+      source: new URL(r.link).hostname,
+    })
+  );
 
   return NextResponse.json({
     success: true,

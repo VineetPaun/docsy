@@ -138,7 +138,11 @@ async function resolvePublicUrl(
     }
   }
 
-  return { url: parsed, address: addresses[0].address, family: addresses[0].family };
+  return {
+    url: parsed,
+    address: addresses[0].address,
+    family: addresses[0].family,
+  };
 }
 
 /**
@@ -209,10 +213,12 @@ function fetchPinned(
       // redirected to an address that was never checked.
       lookup: (hostname, lookupOptions, callback) => {
         if (lookupOptions && (lookupOptions as { all?: boolean }).all) {
-          (callback as unknown as (
-            err: null,
-            addresses: { address: string; family: number }[]
-          ) => void)(null, [{ address, family }]);
+          (
+            callback as unknown as (
+              err: null,
+              addresses: { address: string; family: number }[]
+            ) => void
+          )(null, [{ address, family }]);
         } else {
           callback(null, address, family);
         }
@@ -245,7 +251,9 @@ function fetchPinned(
         if (!allowed) {
           response.destroy();
           reject(
-            new BlockedUrlError(`Unsupported content type: ${bare || "unknown"}`)
+            new BlockedUrlError(
+              `Unsupported content type: ${bare || "unknown"}`
+            )
           );
           return;
         }

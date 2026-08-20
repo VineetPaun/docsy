@@ -69,10 +69,7 @@ if (!Array.isArray(cases) || cases.length === 0) {
 }
 
 /** Rank (1-based) of the first result from an expected source, or 0 for a miss. */
-function firstExpectedRank(
-  names: string[],
-  expectSources: string[]
-): number {
+function firstExpectedRank(names: string[], expectSources: string[]): number {
   const wanted = expectSources.map((s) => s.toLowerCase());
 
   for (let i = 0; i < names.length; i++) {

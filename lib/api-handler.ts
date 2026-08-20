@@ -108,7 +108,7 @@ export function withApiHandler(handler: Handler, options: HandlerOptions = {}) {
       return result instanceof Response ? result : NextResponse.json(result);
     } catch (error) {
       const exposed =
-        error instanceof ApiError ? error : options.expose?.(error) ?? null;
+        error instanceof ApiError ? error : (options.expose?.(error) ?? null);
 
       if (exposed) {
         return NextResponse.json(

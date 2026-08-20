@@ -61,8 +61,8 @@ export function useAudioOverview(notebookId: string, hasSources: boolean) {
    */
   const isGenerating = Boolean(
     overview &&
-      !TERMINAL_STATUSES.includes(overview.status) &&
-      Date.now() - overview.createdAt < STALE_AFTER_MS
+    !TERMINAL_STATUSES.includes(overview.status) &&
+    Date.now() - overview.createdAt < STALE_AFTER_MS
   );
 
   const stageLabel = isGenerating

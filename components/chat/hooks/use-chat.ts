@@ -89,7 +89,9 @@ export function useChat({
   }, [dbMessages]);
 
   const [isLoading, setIsLoading] = React.useState(false);
-  const [streaming, setStreaming] = React.useState<StreamingAnswer | null>(null);
+  const [streaming, setStreaming] = React.useState<StreamingAnswer | null>(
+    null
+  );
   // The last failed question, kept in memory so it can be retried without
   // becoming part of the conversation (AUDIT.md §9.5).
   const [failure, setFailure] = React.useState<{
@@ -213,7 +215,9 @@ export function useChat({
       if (streamError) throw new Error(streamError);
 
       if (!text.trim()) {
-        throw new Error("The model returned an empty response. Please try again.");
+        throw new Error(
+          "The model returned an empty response. Please try again."
+        );
       }
 
       await addMessage({

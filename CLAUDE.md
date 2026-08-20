@@ -37,11 +37,13 @@ bun dev              # terminal 2 — Next.js on :3000
 bunx tsc --noEmit    # typecheck (TypeScript 7 native compiler)
 bun run lint         # ⚠️ CURRENTLY CRASHES — see trap #8
 bun run eval <id>    # retrieval eval against eval/questions.json (AUDIT §7)
+bun run format       # prettier — CI checks this
+bun run e2e          # Playwright; needs a booted app, not wired into CI
 ```
 
 CI (`.github/workflows/ci.yml`) runs `tsc --noEmit`, `eslint` and `bun test` on push and PR — not `next build`, which needs a real Clerk key. **The `eslint` step is red on every push** until trap #8 is resolved; `tsc` and `bun test` are the signal.
 
-`bun test` runs the eleven test files that exist (`lib/qdrant.test.ts` — page-number attribution + retrieval breadth; `lib/file-type.test.ts` — magic-byte sniffing; `lib/rate-limit.test.ts` — fixed-window maths; `lib/embeddings.test.ts` — retry predicate; `lib/openrouter.test.ts` — catalogue filter + provider derivation; `lib/tts-chunks.test.ts` — narration splitting; `lib/env.test.ts` — the boot-required env check; `lib/prompt-guard.test.ts` — a document cannot escape the source fence; `lib/quota.test.ts` — the storage ceiling; `lib/concurrency.test.ts` — the upload pool; `lib/query-rewrite.test.ts` — when a follow-up gets rewritten). Every one covers a *pure function*: nothing tests a route handler or a Convex function, so passing tests are never evidence a feature works end-to-end.
+`bun test` runs the eleven test files that exist (`lib/qdrant.test.ts` — page-number attribution + retrieval breadth; `lib/file-type.test.ts` — magic-byte sniffing; `lib/rate-limit.test.ts` — fixed-window maths; `lib/embeddings.test.ts` — retry predicate; `lib/openrouter.test.ts` — catalogue filter + provider derivation; `lib/tts-chunks.test.ts` — narration splitting; `lib/env.test.ts` — the boot-required env check; `lib/prompt-guard.test.ts` — a document cannot escape the source fence; `lib/quota.test.ts` — the storage ceiling; `lib/concurrency.test.ts` — the upload pool; `lib/query-rewrite.test.ts` — when a follow-up gets rewritten). Every one covers a _pure function_: nothing tests a route handler or a Convex function, so passing tests are never evidence a feature works end-to-end.
 
 ## ⚠️ Read before writing code
 
@@ -49,7 +51,7 @@ These are the traps that cause agents to do the wrong thing here.
 
 **1. Convex auth: never take a user id as an argument.** Identity comes from the verified Clerk JWT, via the helpers in `convex/lib/auth.ts` — `getUser(ctx)` in queries (returns null when anonymous), `requireUser(ctx)` in mutations (throws), plus `requireOwnedNotebook` / `requireOwnedDocument` for ownership. Convex functions are public HTTP endpoints, so a client-supplied `clerkId` lets any caller be any user; that was this repo's worst bug and it is fixed — don't reintroduce it.
 
-⚠️ **The whole thing hangs on `CLERK_JWT_ISSUER_DOMAIN` being set on the *Convex deployment*** (`bunx convex env set …`, not `.env.local`). Missing → `ctx.auth.getUserIdentity()` is null for every request → every query returns empty and every mutation throws `Unauthenticated`. If the app looks logged-out while Clerk clearly has a session, check that first. `AUDIT.md` §3.1.
+⚠️ **The whole thing hangs on `CLERK_JWT_ISSUER_DOMAIN` being set on the _Convex deployment_** (`bunx convex env set …`, not `.env.local`). Missing → `ctx.auth.getUserIdentity()` is null for every request → every query returns empty and every mutation throws `Unauthenticated`. If the app looks logged-out while Clerk clearly has a session, check that first. `AUDIT.md` §3.1.
 
 **2. Missing env vars fail quietly, in different ways.** `/api/chat`, `/api/web-search` and `/api/research` now return **503 naming the variable** — the fabricated "demo" responses are gone. `/api/chat` joined them — no `QDRANT_URL` or embeddings key is a 503 too, since the raw-text fallback that covered for them is gone, so **chat does not work at all without a live Qdrant**. One still degrades silently: no `ELEVENLABS_API_KEY` gives a script with no audio. Copy `.env.example` → `.env.local`; it lists every var and what breaks without it. `AUDIT.md` §0.5 records where each one is read.
 
@@ -57,13 +59,13 @@ These are the traps that cause agents to do the wrong thing here.
 
 **4. `convex/_generated/` is generated output.** Committed, but never hand-edit. If `api.*` types look wrong, run `bunx convex dev` to regenerate.
 
-**5. `canvasContent` / `canvasHtml` are dead but not safely deletable.** The canvas editor was removed in `4d9decb`; the fields survive in `convex/schema.ts` and `updateNotebook`. Removing them is *not* a one-liner — dropping a field from the Convex schema fails the push if any existing row still has it set, so it needs a data migration first.
+**5. `canvasContent` / `canvasHtml` are dead but not safely deletable.** The canvas editor was removed in `4d9decb`; the fields survive in `convex/schema.ts` and `updateNotebook`. Removing them is _not_ a one-liner — dropping a field from the Convex schema fails the push if any existing row still has it set, so it needs a data migration first.
 
-**5b. Every API route must authenticate — and authorize.** New routes start with `requireApiAuth()` from `lib/api-auth.ts`. A session only proves the caller is *some* user, so any route handed a `notebookId` / `documentId` from the request also calls `requireNotebookOwner()` / `requireDocumentOwner()` from `lib/convex-server.ts`. Those fail **closed** — they need a Clerk JWT template named `convex`, and without it every guarded route 403s. They also read Convex, so a caller must delete vectors *before* the Convex row, never after (see `app/notebook/[id]/page.tsx`). A route that spends money (LLM, TTS, web search) also calls `enforceRateLimit()` from `lib/rate-limit.ts` before the first paid call — and the budget name is all the caller passes; the numbers stay server-side in `convex/users.ts`, because an argument-supplied window is one a caller can reset. Also: any route that fetches a user-supplied URL goes through `safeFetchText()` / `assertPublicUrl()` from `lib/url-guard.ts`. Never call bare `fetch()` on a URL that came from a request body. If one route calls another server-to-server, forward the caller's `cookie` header (see `/api/research`) or the inner call 401s silently.
+**5b. Every API route must authenticate — and authorize.** New routes start with `requireApiAuth()` from `lib/api-auth.ts`. A session only proves the caller is _some_ user, so any route handed a `notebookId` / `documentId` from the request also calls `requireNotebookOwner()` / `requireDocumentOwner()` from `lib/convex-server.ts`. Those fail **closed** — they need a Clerk JWT template named `convex`, and without it every guarded route 403s. They also read Convex, so a caller must delete vectors _before_ the Convex row, never after (see `app/notebook/[id]/page.tsx`). A route that spends money (LLM, TTS, web search) also calls `enforceRateLimit()` from `lib/rate-limit.ts` before the first paid call — and the budget name is all the caller passes; the numbers stay server-side in `convex/users.ts`, because an argument-supplied window is one a caller can reset. Also: any route that fetches a user-supplied URL goes through `safeFetchText()` / `assertPublicUrl()` from `lib/url-guard.ts`. Never call bare `fetch()` on a URL that came from a request body. If one route calls another server-to-server, forward the caller's `cookie` header (see `/api/research`) or the inner call 401s silently.
 
-**5c. A new file in `convex/` won't typecheck until codegen runs.** `convex/_generated/api.d.ts` lists modules explicitly, so `internal.myNewModule.foo` is a type error until `bunx convex dev` regenerates it — and codegen needs a configured deployment. Adding an export to an *existing* module works immediately. `convex/http.ts` is exempt (it is found by convention, not through `api`). This is why `purgeVectors` lives in `convex/documents.ts` rather than its own `cleanup.ts`.
+**5c. A new file in `convex/` won't typecheck until codegen runs.** `convex/_generated/api.d.ts` lists modules explicitly, so `internal.myNewModule.foo` is a type error until `bunx convex dev` regenerates it — and codegen needs a configured deployment. Adding an export to an _existing_ module works immediately. `convex/http.ts` is exempt (it is found by convention, not through `api`). This is why `purgeVectors` lives in `convex/documents.ts` rather than its own `cleanup.ts`.
 
-**5c-2. No hyphens in `convex/` filenames.** Convex rejects the whole push, not just the file: `InvalidConfig: lib/rate-limit-window.js is not a valid path to a Convex module`. Path components allow only alphanumerics, underscores and periods, so `convex/` uses camelCase (`rateLimitWindow.ts`) while `lib/` outside it stays kebab-case. Renaming does *not* break `bun test` — the test imports the path directly, not through `api`.
+**5c-2. No hyphens in `convex/` filenames.** Convex rejects the whole push, not just the file: `InvalidConfig: lib/rate-limit-window.js is not a valid path to a Convex module`. Path components allow only alphanumerics, underscores and periods, so `convex/` uses camelCase (`rateLimitWindow.ts`) while `lib/` outside it stays kebab-case. Renaming does _not_ break `bun test` — the test imports the path directly, not through `api`.
 
 **5d. Uploads are typed by their bytes.** `lib/file-type.ts` `sniffFileType()` decides; `file.type` is browser-supplied and ignored. **Every** upload path — including plain text, which the browser could read locally — must go through `/api/process-document`, because that route is where the sniff happens. Adding a client-side shortcut to "save a round trip" reopens the hole. The duplication that used to live here is gone: both dropzones import `extractTextFromFile`, `indexDocument` and the accepted-type map from `lib/source-upload.ts`. Keep it that way — one copy.
 
@@ -73,9 +75,10 @@ These are the traps that cause agents to do the wrong thing here.
 
 **6. `convex/` is fully typed now — keep it that way.** The `/* eslint-disable no-explicit-any */` headers and `ctx: any, args: any` annotations are gone; Convex infers both from the `args:` validators. Don't reintroduce `any` to silence an error.
 
-**7. Formatting is inconsistent** (no Prettier installed — some files use trailing commas, some don't). Match the file you're editing. Don't reformat whole files; it buries real changes in diff noise.
+**7. Prettier is installed and CI checks it.** `bun run format` before committing, or the `format:check` step fails. `convex/_generated/` and `components/ui/` are ignored on purpose — both are generated by a tool that will overwrite your formatting.
 
 **8. `bun run lint` crashes, on purpose — don't "fix" it by downgrading TypeScript.** `typescript@7` is the native compiler and ships **no JS compiler API** (`typescript/lib/typescript.js` is gone; the package's only root export is a version stub). `typescript-eslint@8`, which `eslint-config-next` pulls in, `require()`s that API, so eslint dies before linting a single file with `TypeError: Cannot read properties of undefined (reading 'Cjs')`. There is no released typescript-eslint that supports TS 7 — this is upstream, not a misconfiguration, and it was accepted knowingly when TS 7 landed. Re-check `typescript-eslint`'s `typescript` peer range (`>=4.8.4 <6.1.0` as of the upgrade) before trying again. Two related consequences:
+
 - **eslint must stay on 9.x.** eslint 10 removed the internal `FlatESLint` that `@typescript-eslint/utils` extends → `TypeError: Class extends value undefined`. Independent of the TS 7 problem; both must clear before either bump.
 - **`next build` needs `experimental.useTypeScriptCli: true`** (already set in `next.config.ts`). Next can't use the missing compiler API, so it spawns the `tsc` CLI instead. Remove that flag and the build throws `TypeScript 7.0.2 does not provide the compiler API required by Next.js`.
 
@@ -176,11 +179,11 @@ lib/
 
 ## Further reading
 
-| Doc | Contents |
-|---|---|
-| [TODO.md](TODO.md) | The active execution list — ordered tasks with acceptance criteria and open decisions. **Start here if you're here to do work.** |
-| [AUDIT.md](AUDIT.md) | Full audit at commit `4d9decb`. §0 has orientation + env inventory + staleness check. Its changelog at the top records what has already been fixed and removed. §3 is critical security. §12 is the phased backlog. |
-| [ROADMAP.md](ROADMAP.md) | Post-remediation product strategy. Proposals, not defects — several mutually exclusive. Needs the §7 decisions answered by a human before implementing anything. |
+| Doc                      | Contents                                                                                                                                                                                                            |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [TODO.md](TODO.md)       | The active execution list — ordered tasks with acceptance criteria and open decisions. **Start here if you're here to do work.**                                                                                    |
+| [AUDIT.md](AUDIT.md)     | Full audit at commit `4d9decb`. §0 has orientation + env inventory + staleness check. Its changelog at the top records what has already been fixed and removed. §3 is critical security. §12 is the phased backlog. |
+| [ROADMAP.md](ROADMAP.md) | Post-remediation product strategy. Proposals, not defects — several mutually exclusive. Needs the §7 decisions answered by a human before implementing anything.                                                    |
 
 Both were written against `4d9decb`. If `git log --oneline 4d9decb..HEAD` shows commits, re-read cited lines before trusting either.
 

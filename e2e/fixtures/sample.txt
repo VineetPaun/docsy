@@ -1,0 +1,8 @@
+Quarterly Operations Note
+
+Costs rose 12% year on year, driven mostly by storage and inference spend.
+Headcount was flat. The team shipped the retrieval eval harness in the same
+quarter, which is what made the cost attribution possible in the first place.
+
+Next quarter the plan is to reduce inference cost per answer by caching
+embeddings and marking the system prompt cacheable.

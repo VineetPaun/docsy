@@ -87,9 +87,11 @@ const rows: string[] = [];
 
 for (const evalCase of cases) {
   const embedding = await generateEmbedding(evalCase.question);
-  const results = await searchChunks(embedding, notebookId, {
-    limit: EVAL_LIMIT,
-  });
+  const results = await searchChunks(
+    { embedding, text: evalCase.question },
+    notebookId,
+    { limit: EVAL_LIMIT }
+  );
 
   const names = results.map((r) => r.documentName ?? "");
   const rank = firstExpectedRank(names, evalCase.expectSources);

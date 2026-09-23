@@ -1,17 +1,25 @@
-import { QdrantClient } from "@qdrant/js-client-rest";
+import { QdrantClient, type Schemas } from "@qdrant/js-client-rest";
 import { EMBEDDING_DIMENSION } from "./embeddings";
+import { documentSparseVector, querySparseVector } from "./bm25";
 
 /**
- * Versioned because the embedding model changed (AUDIT.md §5.1). `_v2` holds
- * `gemini-embedding-001` vectors; anything written by `text-embedding-004` is
- * in the unversioned collection and is not comparable to a query embedded
- * today. Bump this whenever the model or dimensionality changes — old points
- * left in place score plausibly and answer wrongly.
+ * Versioned because the vector layout changed. `_v3` holds two named vectors
+ * per point — `dense` (`gemini-embedding-001`, 768 dims) and `bm25` (sparse,
+ * `lib/bm25.ts`) — for hybrid search. `_v2` held one unnamed dense vector and
+ * cannot be queried by name, so nothing reads it any more. Bump this whenever
+ * the model, the dimensionality or the vector layout changes — old points left
+ * in place score plausibly and answer wrongly.
  *
- * Sources indexed before this change need re-uploading; the old collection can
- * be deleted from Qdrant by hand once nothing needs it.
+ * Sources indexed before this change need re-indexing (the "Reindex" row
+ * action); `_v2` can be deleted from Qdrant by hand once that is done. Must
+ * match `VECTOR_COLLECTION` in `convex/documents.ts`.
  */
-const COLLECTION_NAME = "docsy_documents_v2";
+const COLLECTION_NAME = "docsy_documents_v3";
+
+// Vector names inside the collection. Both the write and the query path use
+// them, so they live in one place.
+const DENSE_VECTOR = "dense";
+const SPARSE_VECTOR = "bm25";
 
 let qdrantClient: QdrantClient | null = null;
 
@@ -62,8 +70,12 @@ export async function ensureCollection(): Promise<void> {
     // Collection doesn't exist, create it
     await client.createCollection(COLLECTION_NAME, {
       vectors: {
-        size: EMBEDDING_DIMENSION,
-        distance: "Cosine",
+        [DENSE_VECTOR]: { size: EMBEDDING_DIMENSION, distance: "Cosine" },
+      },
+      // Qdrant applies IDF at query time from its own corpus statistics, which
+      // is the part of BM25 a single chunk cannot compute (`lib/bm25.ts`).
+      sparse_vectors: {
+        [SPARSE_VECTOR]: { modifier: "idf" },
       },
     });
 
@@ -88,20 +100,30 @@ export async function storeChunks(
   const client = getQdrantClient();
   await ensureCollection();
 
-  const points = chunks.map((chunk, i) => ({
-    id: chunk.id,
-    vector: embeddings[i],
-    payload: {
-      documentId: chunk.documentId,
-      notebookId: chunk.notebookId,
-      content: chunk.content,
-      chunkIndex: chunk.chunkIndex,
-      startChar: chunk.startChar,
-      endChar: chunk.endChar,
-      pageNumber: chunk.pageNumber,
-      ...chunk.metadata,
-    },
-  }));
+  const points = chunks.map((chunk, i) => {
+    const sparse = documentSparseVector(chunk.content);
+
+    return {
+      id: chunk.id,
+      vector: {
+        [DENSE_VECTOR]: embeddings[i],
+        // Omitted when the chunk has no indexable terms (all stopwords or
+        // punctuation) — named vectors are optional per point, and the dense
+        // half still finds it.
+        ...(sparse.indices.length > 0 ? { [SPARSE_VECTOR]: sparse } : {}),
+      },
+      payload: {
+        documentId: chunk.documentId,
+        notebookId: chunk.notebookId,
+        content: chunk.content,
+        chunkIndex: chunk.chunkIndex,
+        startChar: chunk.startChar,
+        endChar: chunk.endChar,
+        pageNumber: chunk.pageNumber,
+        ...chunk.metadata,
+      },
+    };
+  });
 
   await client.upsert(COLLECTION_NAME, {
     points,
@@ -109,10 +131,18 @@ export async function storeChunks(
   });
 }
 
-// Minimum cosine similarity a chunk must reach to be treated as relevant.
-// Below this the model still dutifully cites whatever it is handed, so a
-// floor here is what stops irrelevant passages appearing as citations.
+// Minimum cosine similarity a chunk must reach on the dense half to be treated
+// as relevant. Below this the model still dutifully cites whatever it is
+// handed, so a floor here is what stops irrelevant passages appearing as
+// citations. The keyword half has no floor: a BM25 hit already shares a
+// non-stopword term with the question.
 export const DEFAULT_SCORE_THRESHOLD = 0.5;
+
+/**
+ * Each half of a hybrid query fetches this many times the final limit before
+ * fusion, so a chunk ranked just outside one list can still win on the other.
+ */
+const PREFETCH_MULTIPLIER = 3;
 
 /**
  * How many chunks to retrieve for a model with this context window (AUDIT.md §7).
@@ -141,40 +171,86 @@ export function retrievalLimitFor(contextLength: number): number {
   );
 }
 
-// Search for similar chunks
-export async function searchChunks(
-  embedding: number[],
+export interface SearchOptions {
+  limit?: number;
+  documentIds?: string[];
+  scoreThreshold?: number;
+}
+
+/**
+ * The Qdrant request body for one hybrid query.
+ *
+ * Pure and exported so `lib/qdrant.test.ts` can pin its shape — in particular
+ * that the notebook filter reaches every prefetch, which is tenant isolation
+ * and fails silently if it ever drops off one branch.
+ */
+export function buildHybridQuery(
+  query: { embedding: number[]; text: string },
   notebookId: string,
-  options?: {
-    limit?: number;
-    documentIds?: string[];
-    scoreThreshold?: number;
+  options?: SearchOptions
+) {
+  const must: Schemas["FieldCondition"][] = [
+    { key: "notebookId", match: { value: notebookId } },
+  ];
+
+  if (options?.documentIds && options.documentIds.length > 0) {
+    must.push({ key: "documentId", match: { any: options.documentIds } });
   }
+
+  const filter = { must };
+  const limit = options?.limit ?? 10;
+  const prefetchLimit = limit * PREFETCH_MULTIPLIER;
+  const sparse = querySparseVector(query.text);
+
+  // The notebook filter sits on every prefetch, not just the outer query:
+  // the prefetches are what search the index, and an unfiltered one would
+  // rank other tenants' chunks into the fused list.
+  const prefetch = [
+    {
+      query: query.embedding,
+      using: DENSE_VECTOR,
+      filter,
+      limit: prefetchLimit,
+      // Filtered server-side by Qdrant so weak matches never cross the wire.
+      score_threshold: options?.scoreThreshold ?? DEFAULT_SCORE_THRESHOLD,
+    },
+    // A question made only of stopwords has no keyword half; Qdrant rejects
+    // an empty sparse query rather than returning nothing.
+    ...(sparse.indices.length > 0
+      ? [{ query: sparse, using: SPARSE_VECTOR, filter, limit: prefetchLimit }]
+      : []),
+  ];
+
+  return {
+    prefetch,
+    query: { fusion: "rrf" as const },
+    filter,
+    limit,
+    with_payload: true,
+  };
+}
+
+/**
+ * Hybrid search: dense similarity and BM25 keywords, fused by reciprocal rank.
+ *
+ * `query.text` must be the text `query.embedding` was generated from — the
+ * keyword half tokenizes it. `score` on a result is the RRF score, which
+ * orders results but is not a similarity: compare it only within one response.
+ */
+export async function searchChunks(
+  query: { embedding: number[]; text: string },
+  notebookId: string,
+  options?: SearchOptions
 ): Promise<SearchResult[]> {
   const client = getQdrantClient();
   await ensureCollection();
 
-  const filter: Record<string, unknown> = {
-    must: [{ key: "notebookId", match: { value: notebookId } }],
-  };
-
-  if (options?.documentIds && options.documentIds.length > 0) {
-    (filter.must as unknown[]).push({
-      key: "documentId",
-      match: { any: options.documentIds },
-    });
-  }
-
   // qdrant-js 1.19 dropped `search()`; `query()` is the universal replacement and
   // wraps the hits in a `points` array.
-  const { points } = await client.query(COLLECTION_NAME, {
-    query: embedding,
-    filter,
-    limit: options?.limit ?? 10,
-    // Filtered server-side by Qdrant so weak matches never cross the wire.
-    score_threshold: options?.scoreThreshold ?? DEFAULT_SCORE_THRESHOLD,
-    with_payload: true,
-  });
+  const { points } = await client.query(
+    COLLECTION_NAME,
+    buildHybridQuery(query, notebookId, options)
+  );
 
   return points.map((result) => ({
     id: result.id as string,

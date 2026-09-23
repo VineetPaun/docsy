@@ -1,7 +1,8 @@
 "use client";
 
 /**
- * The source list: filter, selection, per-source status, rename and delete.
+ * The source list: filter, selection, per-source status, rename, reindex and
+ * delete.
  *
  * Split out of `sources-panel.tsx` (AUDIT.md §6.2), and the home of the §9.6
  * basics it was missing — a source that never made it into the vector store now
@@ -10,6 +11,8 @@
  */
 
 import * as React from "react";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Refresh01Icon } from "@hugeicons/core-free-icons";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { MIN_INDEXABLE_CHARS } from "@/lib/source-upload";
@@ -44,7 +47,7 @@ function statusBadge(doc: SourceDocument) {
       label: "Not indexed",
       variant: "outline" as const,
       title:
-        "Stored, but indexing failed — chat cannot cite this source yet. Delete and re-add it to retry.",
+        "Stored, but indexing failed — chat cannot cite this source yet. Reindex it to retry.",
     };
   }
 
@@ -65,6 +68,9 @@ interface SourceListProps {
   onDeselectAll: () => void;
   onPreview: (doc: SourceDocument) => void;
   onRename: (doc: SourceDocument) => void;
+  onReindex: (doc: SourceDocument) => void;
+  /** Ids currently being reindexed — their button spins and is disabled. */
+  reindexing: ReadonlySet<string>;
   onDeleteOne: (docId: string) => void;
   onDeleteSelected: () => void;
 }
@@ -77,6 +83,8 @@ export function SourceList({
   onDeselectAll,
   onPreview,
   onRename,
+  onReindex,
+  reindexing,
   onDeleteOne,
   onDeleteSelected,
 }: SourceListProps) {
@@ -248,6 +256,24 @@ export function SourceList({
                       <path d="M12 20h9" />
                       <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
                     </svg>
+                  </button>
+                  <button
+                    onClick={() => onReindex(doc)}
+                    disabled={reindexing.has(doc._id)}
+                    aria-label={`Reindex ${doc.name}`}
+                    title="Reindex for search"
+                    className="rounded p-1 hover:bg-muted disabled:opacity-50"
+                  >
+                    <HugeiconsIcon
+                      icon={Refresh01Icon}
+                      strokeWidth={2}
+                      aria-hidden="true"
+                      className={`size-3.5 text-muted-foreground ${
+                        reindexing.has(doc._id)
+                          ? "animate-spin motion-reduce:animate-none"
+                          : ""
+                      }`}
+                    />
                   </button>
                   <button
                     onClick={() => onDeleteOne(doc._id)}

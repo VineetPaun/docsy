@@ -30,10 +30,11 @@ export const POST = withApiHandler(
 
     const queryEmbedding = await generateEmbedding(query);
 
-    const results = await searchChunks(queryEmbedding, notebookId, {
-      limit,
-      documentIds,
-    });
+    const results = await searchChunks(
+      { embedding: queryEmbedding, text: query },
+      notebookId,
+      { limit, documentIds }
+    );
 
     return {
       success: true,

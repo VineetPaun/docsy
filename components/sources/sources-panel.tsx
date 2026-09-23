@@ -29,6 +29,7 @@ import { SourceList } from "./source-list";
 import { UrlImportPanel } from "./url-import-panel";
 import { WebSearchPanel } from "./web-search-panel";
 import { useDocumentUpload } from "./hooks/use-document-upload";
+import { useReindexSource } from "./hooks/use-reindex-source";
 import type { SourceDocument } from "./types";
 
 interface SourcesPanelProps {
@@ -63,6 +64,7 @@ export function SourcesPanel({
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const { handleFiles, isUploading, uploadProgress } =
     useDocumentUpload(notebookId);
+  const { reindex, pending: reindexing } = useReindexSource(notebookId);
 
   const busy = isUploading || isImportingUrl;
 
@@ -242,6 +244,8 @@ export function SourcesPanel({
           onDeselectAll={() => setSelectedDocs(new Set())}
           onPreview={setPreviewDoc}
           onRename={setRenameDoc}
+          onReindex={reindex}
+          reindexing={reindexing}
           onDeleteOne={(docId) => setDeleteTarget({ type: "single", docId })}
           onDeleteSelected={() =>
             selectedDocs.size > 0 && setDeleteTarget({ type: "multiple" })

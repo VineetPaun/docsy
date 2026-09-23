@@ -46,7 +46,7 @@ CI (`.github/workflows/ci.yml`) runs `tsc --noEmit`, `eslint`, `bun test` and `b
 
 **There are two test runners, and you need both.**
 
-`bun test` covers the pure helpers in `lib/` (chunking and page attribution, magic-byte sniffing, fixed-window maths, the embeddings retry predicate, the OpenRouter catalogue filter, narration splitting, the boot env check, the source fence, the storage ceiling, the upload pool, follow-up rewriting, the snippet/blob split) plus, in `tests/`, the cascade and **all nine route handlers** — `chat-route.test.ts` for the streaming one, `api-routes.test.ts` for the rest. Those assert the contract the wrapper owes a caller: 401 before the handler runs, 429 before the first paid call, 403 on a notebook you do not own, 400 on bad input, 503 naming the missing variable, and a generic 500 that leaks nothing.
+`bun test` covers the pure helpers in `lib/` (chunking and page attribution, magic-byte sniffing, fixed-window maths, the embeddings retry predicate, the OpenRouter catalogue filter, narration splitting, the boot env check, the source fence, the storage ceiling, the upload pool, follow-up rewriting, the snippet/blob split, the BM25 encoder and the hybrid query shape) plus, in `tests/`, the cascade and **all nine route handlers** — `chat-route.test.ts` for the streaming one, `api-routes.test.ts` for the rest. Those assert the contract the wrapper owes a caller: 401 before the handler runs, 429 before the first paid call, 403 on a notebook you do not own, 400 on bad input, 503 naming the missing variable, and a generic 500 that leaks nothing.
 
 ⚠️ **Writing a route test: spread the real module into every `mock.module`.** Bun replaces a module wholesale and the replacement outlives the file, so `mock.module("@/lib/convex-server", () => ({ requireNotebookOwner }))` deletes every other export — for every _later_ test file too. Write `({ ...convexServer, requireNotebookOwner })`. The symptom is `SyntaxError: Export named 'x' not found`, in a file that passes when run alone.
 
@@ -121,7 +121,8 @@ components/
   sources/              the sources panel, split (AUDIT §6.2) — sources-panel.tsx
                         is composition only; one file per concern plus
                         hooks/use-document-upload.ts (extract → store → index,
-                        3 files in flight) and hooks/use-audio-overview.ts
+                        3 files in flight), hooks/use-reindex-source.ts and
+                        hooks/use-audio-overview.ts
   notebook-chat.tsx     728 lines; chat + citations + model picker. The next
                         file that wants the components/sources/* treatment
 convex/
@@ -175,7 +176,13 @@ lib/
                         at 768 dims, retried on 429). Changing the model or the
                         dimensionality means bumping the Qdrant collection
                         version in BOTH lib/qdrant.ts and convex/documents.ts
-  qdrant.ts             vector store + chunking
+  qdrant.ts             vector store + chunking. Hybrid: every point has a
+                        `dense` and a `bm25` vector, fused with RRF. Changing
+                        the vector layout means bumping the collection version
+                        in BOTH lib/qdrant.ts and convex/documents.ts; old
+                        sources then need the row's reindex action
+  bm25.ts               sparse keyword vectors (hashed tokens, TF weights;
+                        Qdrant applies IDF via `modifier: "idf"`)
 ```
 
 **Observability, both optional and both inert unless keyed:** `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN` (`instrumentation.ts`, `instrumentation-client.ts` — traces, replay and PII deliberately off, because this UI is full of the user's own documents) and `HELICONE_API_KEY`, which swaps OpenRouter's base URL for Helicone's pass-through gateway in `postCompletion`. No wrapper, no dependency, byte-identical requests when unset.

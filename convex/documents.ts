@@ -19,7 +19,7 @@ import {
 // or deletes purge points from a collection nothing writes to. Duplicated
 // rather than imported: importing it would pull the Qdrant REST client into the
 // Convex bundle for the sake of one string.
-const VECTOR_COLLECTION = "docsy_documents_v2";
+const VECTOR_COLLECTION = "docsy_documents_v3";
 
 /**
  * How much extracted text the row itself keeps.

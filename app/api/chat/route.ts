@@ -163,10 +163,16 @@ export const POST = withApiHandler(
 
       // Breadth follows the model: 5 chunks was hardcoded regardless of whether
       // the window was 32K or 262K.
-      ragResults = await searchChunks(queryEmbedding, notebookId, {
-        limit: retrievalLimitFor(await modelContextLength(selectedModel)),
-        documentIds: selectedIds,
-      });
+      // Hybrid: the embedding and the words it came from, so an exact term or
+      // ID the embedding blurs still retrieves on the keyword half.
+      ragResults = await searchChunks(
+        { embedding: queryEmbedding, text: searchQuery },
+        notebookId,
+        {
+          limit: retrievalLimitFor(await modelContextLength(selectedModel)),
+          documentIds: selectedIds,
+        }
+      );
     } catch {
       // "Search broke" and "nothing relevant in your sources" are different
       // answers, and the user cannot tell them apart from the reply. Say the
@@ -176,14 +182,16 @@ export const POST = withApiHandler(
     }
 
     // Source text is untrusted: fenced, and labelled as data in the rule the
-    // system prompt carries (ROADMAP.md §3.4).
+    // system prompt carries (ROADMAP.md §3.4). No score in the header: hybrid
+    // results carry a fused rank score, not a similarity, and the order
+    // already says which passage ranked first.
     const documentContext =
       ragResults.length > 0
         ? fenceSourceData(
             ragResults
               .map(
                 (r, i) =>
-                  `[${i + 1}] From "${r.documentName || "Unknown"}"${r.pageNumber ? ` (Page ${r.pageNumber})` : ""} (Score: ${r.score.toFixed(2)})\n${r.content}`
+                  `[${i + 1}] From "${r.documentName || "Unknown"}"${r.pageNumber ? ` (Page ${r.pageNumber})` : ""}\n${r.content}`
               )
               .join("\n\n---\n\n")
           )

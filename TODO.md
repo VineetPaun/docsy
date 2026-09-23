@@ -7,7 +7,7 @@ here is simply deleted; the git history is the record of what landed.
 
 ## Future-agent handoff
 
-**Current priority:** runtime proof, not another feature build. There are 41
+**Current priority:** runtime proof, not another feature build. There are 43
 unchecked runtime acceptance checks in §§1–8, plus three documentation tasks in
 §9. Code reading and green unit tests do not close the runtime checks; run them
 against a configured Convex/Clerk/Qdrant deployment and record concrete
@@ -37,9 +37,10 @@ streamed answers, source fencing, sorted indexes, embedding and prompt caching,
 every god component split, Server-Component auth shells, a draggable split, a
 pinned SSRF connection, an eval harness, Sentry + Helicone, and route, cascade
 and end-to-end tests. Since then the source text moved out of the Convex row
-into file storage, and the registered Convex functions have their own suite —
+into file storage, retrieval went hybrid (dense + BM25 in `docsy_documents_v3`,
+with a per-source reindex action), and the registered Convex functions have their own suite —
 ownership, caps, quota, rate limits, webhook replay and account deletion.
-`bunx tsc --noEmit` clean, `bun test` 106/106, `bun run test:convex` 36/36,
+`bunx tsc --noEmit` clean, `bun test` 117/117, `bun run test:convex` 36/36,
 prettier enforced.
 
 ⚠️ **Two test runners now.** `bun test` skips `tests/convex/*.vitest.ts` by
@@ -107,11 +108,25 @@ does not mean the endpoint is registered.
 
 - [ ] **Confirm the embedding pipeline writes vectors** (§5.1). `lib/embeddings.ts`
       is on `@google/genai` + `gemini-embedding-001` and has never run. Upload a
-      document and check the point count in **`docsy_documents_v2`** directly.
-      ⚠️ The collection is versioned, so anything indexed before the swap
-      retrieves nothing until re-uploaded; and with the fallback deleted, a dead
-      pipeline answers "not in your sources" to _everything_ — identical to an
-      irrelevant question. Check Qdrant, not the chat output
+      document and check the point count in **`docsy_documents_v3`** directly,
+      and that its points carry both a `dense` and a `bm25` vector.
+      ⚠️ The collection is versioned, so anything indexed into `_v2` retrieves
+      nothing until it is reindexed (the row's reindex button); and with the
+      fallback deleted, a dead pipeline answers "not in your sources" to
+      _everything_, which looks the same as an irrelevant question. Check
+      Qdrant, not the chat output
+- [ ] **Hybrid search against a real Qdrant.** The fused query (dense +
+      `bm25` prefetch, `fusion: "rrf"`, `modifier: "idf"`) needs Qdrant ≥ 1.10
+      and has only been checked for shape (`lib/qdrant.test.ts`). Ask about an
+      exact ID or code that appears once in a source (a SKU, "ISO 27001"): it
+      should be cited even when the dense score alone would miss it. Then ask
+      something unrelated that shares one generic word with a source, and check
+      it still gets "not in your sources" (the keyword half has no score floor)
+- [ ] **Reindex a source** from the row action: a toast confirms it, the
+      point count for that `documentId` in `_v3` matches its chunk count (no
+      duplicates on a second reindex), and a long source reindexes from its
+      full stored text, not the 2,000-char snippet. Then delete `_v2` from
+      Qdrant by hand
 - [ ] Ask a question a source clearly answers → citations render. Ask one
       nothing covers → "not in your sources", no invented answer
 - [ ] Unset `QDRANT_URL` locally and send a message → 503 naming it as a
@@ -236,9 +251,7 @@ Every one of these was written by reading, never by looking.
 
 ## Decisions needed (not code)
 
-**1. Reranking (§7).** The single biggest retrieval quality jump, and the reason `k` is clamped at 20. Needs a paid key (Cohere Rerank or a hosted `bge-reranker-v2`) and adds a third-party hop to the chat path. Measure it with `bun run eval` before and after — the harness exists precisely so this is a number, not a feeling.
-
-**2. Hybrid search (§7).** Dense retrieval misses exact terms, IDs and acronyms. Qdrant does sparse vectors natively, but adding them means collection `_v3` and **re-indexing every existing source**. Decide whether that migration is worth doing at the same time as reranking, since both touch the same code path.
+**1. Reranking (§7).** The biggest retrieval quality jump still available, and the reason `k` is clamped at 20. Needs a paid key (Cohere Rerank or a hosted `bge-reranker-v2`) and adds a third-party hop to the chat path. Measure it with `bun run eval` before and after — the harness exists precisely so this is a number, not a feeling.
 
 **3. `eslint` 10 / `typescript-eslint`** — blocked upstream, nothing to decide, but note the cost: **`bun run lint` does not run at all** on TypeScript 7, so `tsc --noEmit` and `bun test` are the only signal, and CI's eslint step is red on every push. Recheck with `bun outdated` when a `typescript-eslint` release supports TS 7.
 
@@ -254,6 +267,6 @@ Every one of these was written by reading, never by looking.
 
 **Blocked upstream:** `eslint` 10 and a `typescript-eslint` that supports TypeScript 7 (§5.7). Until then `bun run lint` cannot run at all and CI's lint step is `continue-on-error`.
 
-**After reranking and hybrid search:** structure-aware chunking, parent-document retrieval, multi-query and HyDE (§7). Injection mitigations beyond source fencing only start mattering when the model gets tools; `SECURITY.md` records that as an accepted residual.
+**After reranking:** structure-aware chunking, parent-document retrieval, multi-query and HyDE (§7). Injection mitigations beyond source fencing only start mattering when the model gets tools; `SECURITY.md` records that as an accepted residual.
 
 Per CLAUDE.md: **when an item here is fully done, delete the line** — no ✅, no strikethrough.

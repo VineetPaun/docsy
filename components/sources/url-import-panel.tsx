@@ -14,7 +14,7 @@ import { toast } from "sonner";
 import { api } from "@/convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { convexErrorMessage } from "@/lib/convex-error";
-import { indexDocument } from "@/lib/source-upload";
+import { indexDocument, storeSourceText } from "@/lib/source-upload";
 
 interface UrlImportPanelProps {
   notebookId: string;
@@ -34,6 +34,8 @@ export function UrlImportPanel({
   const [isProcessing, setIsProcessing] = React.useState(false);
 
   const createDocument = useMutation(api.documents.createDocument);
+  // Needed to park the source's full text in storage rather than the row.
+  const generateUploadUrl = useMutation(api.documents.generateUploadUrl);
   const setIndexStatus = useMutation(api.documents.setIndexStatus);
 
   // The parent disables Upload while a URL is in flight and vice versa.
@@ -70,11 +72,15 @@ export function UrlImportPanel({
 
       const isYouTube = data.sourceType === "youtube";
 
+      // Full text to storage, snippet to the row — a long article or a video
+      // transcript can exceed Convex's 1 MB document cap (AUDIT.md §8).
+      const text = await storeSourceText(generateUploadUrl, data.content ?? "");
+
       const documentId = await createDocument({
         notebookId: notebookId as never,
         name: data.title || url.hostname,
         type: isYouTube ? "youtube" : "url",
-        content: data.content,
+        ...text,
         sourceType: data.sourceType,
         sourceUrl: urlInput.trim(),
         thumbnailUrl: data.thumbnailUrl,

@@ -26,7 +26,9 @@ const FILTER_THRESHOLD = 4;
  * recorded, because that source can never be cited.
  */
 function statusBadge(doc: SourceDocument) {
-  const length = doc.content?.length ?? 0;
+  // `contentLength` is the full text's size; `content` is only a snippet now,
+  // so measuring it would report every long source as 2k (AUDIT.md §8).
+  const length = doc.contentLength ?? doc.content?.length ?? 0;
 
   if (length < MIN_INDEXABLE_CHARS) {
     return {

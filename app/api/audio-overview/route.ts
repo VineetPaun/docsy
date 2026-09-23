@@ -7,7 +7,7 @@ import {
 import { ApiError, badRequest, withApiHandler } from "@/lib/api-handler";
 import {
   authedConvexClient,
-  notebookDocuments,
+  notebookSourceTexts,
   requireNotebookOwner,
 } from "@/lib/convex-server";
 import { fenceSourceData, SOURCE_DATA_RULE } from "@/lib/prompt-guard";
@@ -315,9 +315,12 @@ export const POST = withApiHandler(
       // Source text is read from Convex, never taken from the request body — the
       // client used to post every document's full content, which meant the route
       // narrated whatever the caller supplied under any notebook id it liked.
-      const documents = (await notebookDocuments(notebookId))
-        .filter((doc) => (doc.content?.length ?? 0) > MIN_CONTENT_CHARS)
-        .map((doc) => ({ name: doc.name, content: doc.content ?? "" }));
+      // Full text, fetched from storage — the row only holds a snippet now
+      // (AUDIT.md §8), and narrating 2,000 characters of a book is not an
+      // overview of it.
+      const documents = (await notebookSourceTexts(notebookId)).filter(
+        (doc) => doc.content.length > MIN_CONTENT_CHARS
+      );
 
       if (documents.length === 0) {
         // Marked failed by the catch below, with this same message.

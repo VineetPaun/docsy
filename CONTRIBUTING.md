@@ -52,14 +52,14 @@ CLAUDE.md trap 8 has the detail.
 
 ## Docs are part of the change
 
-`AUDIT.md`, `ROADMAP.md` and `TODO.md` describe **outstanding** work only.
+`TODO.md` describes **outstanding** work only.
 
 - A finding that is fully fixed is **deleted**, not ticked. No ✅, no
   strikethrough, no "DONE" row.
 - A partly fixed finding is **rewritten** to describe only what remains.
 - Section numbers are never renumbered — a gap means something was closed.
-- Add one line to the changelog at the top of `AUDIT.md` so nobody re-audits it
-  as a fresh finding.
+- `SECURITY.md` lists the accepted residuals. If your change closes one, remove
+  it from that list in the same PR.
 
 ## Pull requests
 

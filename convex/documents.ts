@@ -1,5 +1,6 @@
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 import { internalAction, mutation, query } from "./_generated/server";
 import {
   getUser,
@@ -11,7 +12,6 @@ import { purgeDocument } from "./lib/cascade";
 import {
   addStorageBytes,
   assertStorageHeadroom,
-  documentBytes,
   measureDocumentBytes,
 } from "./lib/quota";
 
@@ -20,6 +20,20 @@ import {
 // rather than imported: importing it would pull the Qdrant REST client into the
 // Convex bundle for the sake of one string.
 const VECTOR_COLLECTION = "docsy_documents_v2";
+
+/**
+ * How much extracted text the row itself keeps.
+ *
+ * A Convex document is capped at 1 MB, and the extracted text of a long PDF
+ * exceeds that by itself, so the full text lives in file storage and the row
+ * keeps a snippet (AUDIT.md §8). The snippet is what renders instantly in the
+ * preview and what an old row's readers fall back to.
+ *
+ * Duplicated in `lib/source-upload.ts`, which slices before sending: the
+ * client must not ship a megabyte of text it knows will be thrown away, and
+ * this mutation is a public HTTP endpoint that cannot trust it did.
+ */
+const SNIPPET_CHARS = 2_000;
 
 // Storage, embedding and retrieval all cost per source. Without a ceiling one
 // account can drive unbounded spend on a notebook nobody reads.
@@ -71,13 +85,54 @@ export const getDocument = query({
   },
 });
 
+/**
+ * A signed URL for a source's full extracted text.
+ *
+ * The text is a storage blob rather than a row field, so anything that needs
+ * more than the snippet — the preview dialog, the audio-overview route —
+ * fetches it from here (AUDIT.md §8).
+ *
+ * Returns null for a row written before the split, whose full text is still
+ * inline in `content`; every caller falls back to that.
+ */
+export const getContentUrl = query({
+  args: { documentId: v.id("documents") },
+  handler: async (ctx, args) => {
+    const user = await getUser(ctx);
+    if (!user) {
+      return null;
+    }
+
+    const document = await ctx.db.get(args.documentId);
+
+    if (!document || document.userId !== user._id) {
+      return null;
+    }
+
+    if (!document.contentStorageId) {
+      return null;
+    }
+
+    return await ctx.storage.getUrl(
+      document.contentStorageId as Id<"_storage">
+    );
+  },
+});
+
 // Create a new document
 export const createDocument = mutation({
   args: {
     notebookId: v.id("notebooks"),
     name: v.string(),
     type: v.string(),
+    // The snippet, not the full text — see SNIPPET_CHARS. Re-sliced below
+    // regardless of what the caller sent.
     content: v.optional(v.string()),
+    // Storage id of the full extracted text, uploaded by the caller first.
+    contentStorageId: v.optional(v.string()),
+    // Length of that full text. Only a hint: it is re-derived from the stored
+    // blob's own size for quota purposes, so a lie here buys nothing.
+    contentLength: v.optional(v.number()),
     storageId: v.optional(v.string()),
     sourceType: v.optional(v.string()),
     sourceUrl: v.optional(v.string()),
@@ -113,7 +168,9 @@ export const createDocument = mutation({
       userId: user._id,
       name: args.name,
       type: args.type,
-      content: args.content,
+      content: args.content?.slice(0, SNIPPET_CHARS),
+      contentStorageId: args.contentStorageId,
+      contentLength: args.contentLength,
       storageId: args.storageId,
       sourceType: args.sourceType || "file",
       sourceUrl: args.sourceUrl,
@@ -129,33 +186,6 @@ export const createDocument = mutation({
     await ctx.db.patch(args.notebookId, { updatedAt: Date.now() });
 
     return documentId;
-  },
-});
-
-// Update document content (after processing)
-export const updateDocumentContent = mutation({
-  args: {
-    documentId: v.id("documents"),
-    content: v.string(),
-  },
-  handler: async (ctx, args) => {
-    const user = await requireUser(ctx);
-    const document = await requireOwnedDocument(ctx, user, args.documentId);
-
-    // Rewriting the text changes what the account is storing, so the quota has
-    // to follow it — otherwise a caller could replace 1 KB of content with 50 MB
-    // for free, as many times as it liked.
-    const delta = args.content.length - (document.content?.length ?? 0);
-    if (delta > 0) {
-      assertStorageHeadroom(user, delta);
-    }
-
-    await ctx.db.patch(args.documentId, {
-      content: args.content,
-      bytes: Math.max(0, documentBytes(document) + delta),
-    });
-
-    await addStorageBytes(ctx, user._id, delta);
   },
 });
 
@@ -268,31 +298,6 @@ export const generateUploadUrl = mutation({
     await requireUser(ctx);
 
     return await ctx.storage.generateUploadUrl();
-  },
-});
-
-// Get storage URL for a file
-export const getStorageUrl = query({
-  args: { storageId: v.id("_storage") },
-  handler: async (ctx, args) => {
-    const user = await getUser(ctx);
-    if (!user) {
-      return null;
-    }
-
-    // A signed download URL for any storage id was previously one call away.
-    // Only hand one out if the caller owns a document that references it.
-    const ownDocuments = await ctx.db
-      .query("documents")
-      .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .collect();
-
-    const owned = ownDocuments.some((doc) => doc.storageId === args.storageId);
-    if (!owned) {
-      return null;
-    }
-
-    return await ctx.storage.getUrl(args.storageId);
   },
 });
 

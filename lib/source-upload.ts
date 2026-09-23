@@ -93,3 +93,69 @@ export async function indexDocument(args: {
     return "failed";
   }
 }
+
+/**
+ * How much of a source's text the Convex row keeps.
+ *
+ * Must match `SNIPPET_CHARS` in `convex/documents.ts`, which re-slices whatever
+ * arrives — this copy exists so the client never ships the megabyte it knows
+ * will be discarded.
+ */
+export const SOURCE_SNIPPET_CHARS = 2_000;
+
+/** What `createDocument` needs in order to record a source's text. */
+export interface StoredSourceText {
+  /** Preview snippet kept on the row. */
+  content: string;
+  /** Storage id of the full text, absent if it could not be stored. */
+  contentStorageId?: string;
+  /** Length of the full text, so the row knows the real size. */
+  contentLength: number;
+}
+
+/**
+ * Put a source's extracted text in Convex file storage and return what the row
+ * should record.
+ *
+ * A Convex document is capped at 1 MB and the extracted text of a long PDF
+ * exceeds that on its own, so storing it inline made large sources fail at
+ * `createDocument` with an opaque error (AUDIT.md §8). Mutations cannot write
+ * to storage, so the upload happens here and the row is handed the id.
+ *
+ * Never throws: a source whose text blob fails to upload still stores its
+ * snippet and still indexes, which is strictly better than losing the upload.
+ * Readers fall back to `content`, exactly as they do for rows written before
+ * the split.
+ *
+ * @param generateUploadUrl the `api.documents.generateUploadUrl` mutation
+ */
+export async function storeSourceText(
+  generateUploadUrl: () => Promise<string>,
+  text: string
+): Promise<StoredSourceText> {
+  const base = {
+    content: text.slice(0, SOURCE_SNIPPET_CHARS),
+    contentLength: text.length,
+  };
+
+  // Nothing to move out of the row, and an empty blob is still a stored file.
+  if (text.length <= SOURCE_SNIPPET_CHARS) {
+    return base;
+  }
+
+  try {
+    const uploadUrl = await generateUploadUrl();
+    const response = await fetch(uploadUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: new Blob([text], { type: "text/plain" }),
+    });
+
+    if (!response.ok) return base;
+
+    const { storageId } = await response.json();
+    return { ...base, contentStorageId: storageId };
+  } catch {
+    return base;
+  }
+}

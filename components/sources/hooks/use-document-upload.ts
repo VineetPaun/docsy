@@ -23,6 +23,7 @@ import {
   extractTextFromFile,
   indexDocument,
   isAcceptedFile,
+  storeSourceText,
 } from "@/lib/source-upload";
 
 /**
@@ -66,11 +67,16 @@ export function useDocumentUpload(notebookId: string) {
 
       const { storageId } = await result.json();
 
+      // The extracted text goes to storage, not into the row: a Convex
+      // document is capped at 1 MB and a long PDF's text exceeds that alone
+      // (AUDIT.md §8).
+      const text = await storeSourceText(generateUploadUrl, content);
+
       const documentId = await createDocument({
         notebookId: notebookId as never,
         name: file.name,
         type: documentTypeFor(file),
-        content,
+        ...text,
         storageId,
       });
 

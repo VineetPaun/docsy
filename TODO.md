@@ -1,8 +1,34 @@
-# TODO — 2026-08-18
+# TODO — 2026-09-21
 
 The doing list. Only open work lives here: a finished item is deleted, not
 ticked. The record of what has already landed, with the reasoning, is the
-changelog at the top of [AUDIT.md](AUDIT.md) — this file does not duplicate it.
+`SECURITY.md`, which lists the accepted security residuals. Anything closed
+here is simply deleted; the git history is the record of what landed.
+
+## Future-agent handoff
+
+**Current priority:** runtime proof, not another feature build. There are 41
+unchecked runtime acceptance checks in §§1–8, plus three documentation tasks in
+§9. Code reading and green unit tests do not close the runtime checks; run them
+against a configured Convex/Clerk/Qdrant deployment and record concrete
+evidence before deleting an item.
+
+Work in this order:
+
+1. Complete §1 pre-flight and confirm Clerk identity, webhook provisioning and
+   schema deployment.
+2. Complete §2–§4, with §3 embedding/Qdrant verification treated as blocking.
+3. Complete §5–§8: audio, mobile/accessibility, route regressions, E2E and
+   optional observability checks.
+4. Only after runtime proof, take the two implementation items under
+   **Code still owed**.
+5. Do not build the evidence-gated items under **Waiting on evidence** or the
+   future roadmap until their trigger or product decision exists.
+
+**Tree-verified gaps still open:** `eval/questions.json` is absent (only the
+example exists); CI's `next build` + Playwright job exists but stays dormant
+until the Clerk repo secrets are added. These map to the code items below, not
+extra duplicate tasks.
 
 **Where things stand.** Every Phase 0, Phase 1 and Phase 2 _code_ item is
 written and committed: Convex auth off the Clerk JWT, per-route ownership behind
@@ -10,8 +36,14 @@ one wrapper, rate limits, a byte quota, cascade deletes, magic-byte typing,
 streamed answers, source fencing, sorted indexes, embedding and prompt caching,
 every god component split, Server-Component auth shells, a draggable split, a
 pinned SSRF connection, an eval harness, Sentry + Helicone, and route, cascade
-and end-to-end tests. `bunx tsc --noEmit` clean, `bun test` 88/88, prettier
-enforced.
+and end-to-end tests. Since then the source text moved out of the Convex row
+into file storage, and the registered Convex functions have their own suite —
+ownership, caps, quota, rate limits, webhook replay and account deletion.
+`bunx tsc --noEmit` clean, `bun test` 106/106, `bun run test:convex` 36/36,
+prettier enforced.
+
+⚠️ **Two test runners now.** `bun test` skips `tests/convex/*.vitest.ts` by
+design, so running only it misses every Convex function test. CI runs both.
 
 ⚠️ **`bun run lint` cannot run** — TypeScript 7 ships no compiler API for
 `typescript-eslint@8`, so CI's eslint step is red on every push. Accepted, not a
@@ -52,8 +84,9 @@ does not mean the endpoint is registered.
       ⚠️ Nothing else creates `users` rows
 - [ ] `bunx convex dev` in one terminal, `bun dev` in another. **This push
       carries a schema change** — `users.storageBytes`, `documents.bytes`,
-      `documents.indexStatus`, a `webhookEvents` table and three indexes. A push
-      failure blocks everything below
+      `documents.indexStatus`, `documents.contentStorageId`,
+      `documents.contentLength`, a `webhookEvents` table and three indexes. A
+      push failure blocks everything below
 - [ ] **Confirm identity arrives:** a throwaway query returning
       `await ctx.auth.getUserIdentity()`, called while signed in. **If it is
       null, stop and fix that first** — every item below fails identically, so
@@ -111,6 +144,16 @@ does not mean the endpoint is registered.
 - [ ] A source whose embedding failed shows **"Not indexed"** with an
       explanation on hover; renaming a source updates the citation chips; a
       fifth source makes the filter box appear
+- [ ] **Upload a source whose extracted text exceeds 1 MB** (a long PDF): it
+      stores, the row's `content` is 2,000 chars, `contentStorageId` is set,
+      and the preview dialog shows the whole text after a beat. Before the
+      split this failed at `createDocument` with an opaque Convex error
+- [ ] Open a source uploaded **before** this change: the preview still shows its
+      full text from the row, and the list badge still reports its real size
+- [ ] Delete a source that has a text blob and confirm **both** stored files are
+      gone, and `users.storageBytes` came back down by both
+- [ ] Generate an audio overview for a notebook whose sources are all large:
+      the script must reflect the full text, not the first 2,000 characters
 - [ ] After deleting a document, its Qdrant point count drops to zero (check
       Qdrant directly — a stale vector is invisible until it returns as a ghost
       citation)
@@ -148,15 +191,21 @@ Every one of these was written by reading, never by looking.
 - [ ] **The source preview dialog:** focus stays inside and returns to the chip
       on close, Escape dismisses, the highlighted passage still scrolls into
       view, and the header fits a 375px viewport
-- [ ] Run `axe` over the notebook page and the dashboard, and read one answer
-      with a screen reader
+- [ ] `bun run e2e` with a booted app and `E2E_CLERK_*` set — the `axe` specs
+      cover the landing page, the dashboard and the notebook page at both
+      desktop and iPhone width. **Never executed:** written, listed by
+      Playwright, but no browser has run it. Expect real findings the first time
+- [ ] Read one answer with a screen reader. The one part `axe` cannot do
 
 ## 7. The 2026-08-20 batch
 
-- [ ] **Every route still answers.** The nine handlers moved onto one wrapper:
-      upload a file, import a URL, run a web search, send a chat message,
-      generate an overview. A wrong `expose` or a swallowed `Response` shows up
-      as a 500 where a 400 used to be
+- [ ] **Every route still answers _with real dependencies_.** The wrapper
+      contract — 401/429/403/400/503 and a leak-free 500 — is now covered for
+      all nine handlers by `tests/api-routes.test.ts`, including the `expose`
+      hook that turns a blocked URL into a 400. What a mock cannot tell you is
+      whether the happy path works, so still do it by hand once: upload a file,
+      import a URL, run a web search, send a chat message, generate an
+      overview
 - [ ] **A blocked URL still explains itself** — paste `http://127.0.0.1:6333` as
       a source: a 400 saying the host is not allowed, not a generic failure
 - [ ] **Sign out and hit `/dashboard` directly** — a redirect to sign-in with no
@@ -166,8 +215,8 @@ Every one of these was written by reading, never by looking.
 - [ ] **Ask the same question twice** — the second answer should skip the
       embedding call (watch Helicone, or the latency). With an Anthropic model,
       the second request should report cached input tokens
-- [ ] `bun run e2e` once, with the app booted: the landing specs should pass
-      without credentials
+- [ ] `bun run e2e` once, with the app booted: the landing and landing-axe
+      specs should pass without credentials
 
 ## 8. Observability, if keyed
 
@@ -175,6 +224,13 @@ Every one of these was written by reading, never by looking.
       (and that no document text rides along with it)
 - [ ] With `HELICONE_API_KEY` set, send one chat message and confirm the request
       appears there with its model tag
+
+## 9. Documentation and release hygiene
+
+- [ ] Look at the trimmed landing footer in a browser, light and dark, at
+      375px and desktop. It lost three columns of dead links and is now brand +
+      three real links + a bottom bar; the balance was only reasoned about,
+      not seen.
 
 ---
 
@@ -190,17 +246,14 @@ Every one of these was written by reading, never by looking.
 
 ## Code still owed, after the runtime checks pass
 
-Short list now. Detail for each is in [AUDIT.md](AUDIT.md).
+1. **Finish the canvas-field migration** (§4.11) — the migrate step is written and tested; it needs a deployment to run against. Run `bunx convex run notebooks:clearCanvasFields` until it reports `cleared: 0`, confirm with `bunx convex run notebooks:canvasFieldsRemaining`, then delete `canvasContent` / `canvasHtml` / `canvasLastEditedAt` from `convex/schema.ts`, push, and delete both functions plus their tests. Closes CLAUDE.md trap 5
+2. **Add the Clerk repo secrets** so CI's `browser` job stops skipping — `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` (`lib/env.ts` requires both, not one). The job, the build step, the Playwright run and the `axe` pass are all written and gated on them; adding the secrets is the whole remaining task. `E2E_CLERK_EMAIL` / `E2E_CLERK_PASSWORD` additionally unlock the signed-in specs
+3. **A screen-reader pass** (§9.4) — `axe` is automated now (`e2e/accessibility.e2e.ts`), but a machine cannot tell you whether an answer and its citations read sensibly aloud. Still owed, still manual
 
-1. **`next build` and the Playwright landing spec in CI** (§10) — both need a real `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` as a repo secret. One secret unblocks both
-2. **Move document text out of the row** (§8) — `content` is stored inline and Convex caps a document at 1 MB. Keep metadata plus a snippet in the row, the full text in storage
-3. **An `axe` and screen-reader pass** (§9.4) — the accessibility work was written by reading and has never been observed
-4. **Convex function tests** (§10) — the helpers are covered; no registered mutation is. Needs `convex-test`, which is vitest-only, so it costs a second runner. Worth it when a mutation's own logic outgrows its helpers
-
-**Waiting on evidence, deliberately not built** — each is documented with its trigger, so don't build one without it: durable audio generation (§4.2, needs real strandings), a `vectorPurgeQueue` cron (§4.1, needs real orphans), the canvas-field migration (§4.11, do it when the schema is touched anyway), OCR + keeping a rejected scan (§4.10), DOCX page attribution (§4.9).
+**Waiting on evidence, deliberately not built** — each is documented with its trigger, so don't build one without it: durable audio generation (§4.2, needs real strandings), a `vectorPurgeQueue` cron (§4.1, needs real orphans), OCR + keeping a rejected scan (§4.10), DOCX page attribution (§4.9).
 
 **Blocked upstream:** `eslint` 10 and a `typescript-eslint` that supports TypeScript 7 (§5.7). Until then `bun run lint` cannot run at all and CI's lint step is `continue-on-error`.
 
-**After reranking and hybrid search:** structure-aware chunking, parent-document retrieval, multi-query and HyDE (§7). Injection mitigations 2–5 stay in ROADMAP §3.4 and only start mattering when the model gets tools.
+**After reranking and hybrid search:** structure-aware chunking, parent-document retrieval, multi-query and HyDE (§7). Injection mitigations beyond source fencing only start mattering when the model gets tools; `SECURITY.md` records that as an accepted residual.
 
-Per CLAUDE.md: **when an item here is fully done, delete the line** — no ✅, no strikethrough. Same rule as AUDIT.md.
+Per CLAUDE.md: **when an item here is fully done, delete the line** — no ✅, no strikethrough.

@@ -45,7 +45,10 @@ async function deleteFileIfPresent(ctx: MutationCtx, storageId?: string) {
  * document.
  */
 export async function purgeDocument(ctx: MutationCtx, doc: Doc<"documents">) {
+  // Two blobs per source since the extracted text moved out of the row: the
+  // uploaded file and the text itself (AUDIT.md §8).
   await deleteFileIfPresent(ctx, doc.storageId);
+  await deleteFileIfPresent(ctx, doc.contentStorageId);
   await ctx.db.delete(doc._id);
 
   // Freeing the bytes is part of freeing the source. Skip it and the account's
@@ -75,6 +78,7 @@ export async function purgeNotebook(
 
   for (const doc of documents) {
     await deleteFileIfPresent(ctx, doc.storageId);
+    await deleteFileIfPresent(ctx, doc.contentStorageId);
     await ctx.db.delete(doc._id);
     await addStorageBytes(ctx, doc.userId, -documentBytes(doc));
   }

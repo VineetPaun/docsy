@@ -35,12 +35,16 @@ export default defineConfig({
 
   // Reuses a server you already have running, which is the usual case here —
   // `bunx convex dev` has to be running alongside it either way.
+  //
+  // CI has no dev server to reuse and has already run `next build`, so it
+  // serves the production output instead: `bun dev` there would compile every
+  // route on first request and blow the timeout.
   webServer: process.env.E2E_BASE_URL
     ? undefined
     : {
-        command: "bun dev",
+        command: process.env.CI ? "bun run start" : "bun dev",
         url: "http://localhost:3000",
-        reuseExistingServer: true,
+        reuseExistingServer: !process.env.CI,
         timeout: 120_000,
       },
 });

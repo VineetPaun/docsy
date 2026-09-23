@@ -1,9 +1,19 @@
-# Typecheck, lint and unit tests on every push and PR (AUDIT.md §10).
+# Typecheck, lint and unit tests on every push and PR (AUDIT.md §10), plus a
+# second job that builds the app and drives it in a browser.
 #
-# `next build` is deliberately absent: prerendering /_not-found initialises the
-# Clerk SDK, which needs a real NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY. Add it as a
-# repo secret and a build step here once one is available — a step that always
-# fails is worse than no step.
+# The `browser` job needs real Clerk keys — prerendering /_not-found
+# initialises the Clerk SDK, and `lib/env.ts` refuses to boot the server
+# without the pair. It is therefore **gated on the secrets existing** rather
+# than committed as a step that always fails: with them it builds, audits and
+# runs the E2E specs; without them every step reports skipped and says why.
+#
+# To turn it on, add two repo secrets:
+#
+#   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY   CLERK_SECRET_KEY
+#
+# Optionally add E2E_CLERK_EMAIL / E2E_CLERK_PASSWORD for a test account; the
+# signed-in specs skip themselves without them, and the landing and
+# accessibility specs run either way.
 
 name: CI
 
@@ -43,3 +53,65 @@ jobs:
       # convex/_generated is committed, so this needs no Convex deployment.
       - name: Unit tests
         run: bun test
+
+      # Convex functions, under vitest — `convex-test` needs a Vite module
+      # graph and an edge-runtime VM, which `bun test` cannot give it
+      # (AUDIT.md §10). Also needs no deployment: the schema and the generated
+      # api are both committed.
+      - name: Convex function tests
+        run: bun run test:convex
+
+  # Build + browser. Separate job so a missing secret leaves `check` reporting
+  # honestly rather than dragging the whole workflow amber.
+  browser:
+    runs-on: ubuntu-latest
+
+    env:
+      # `secrets` cannot be read in a job-level `if`, so the presence check
+      # happens per step against these.
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+      CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+      NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}
+      E2E_CLERK_EMAIL: ${{ secrets.E2E_CLERK_EMAIL }}
+      E2E_CLERK_PASSWORD: ${{ secrets.E2E_CLERK_PASSWORD }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Report why this job is idle
+        if: env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY == '' || env.CLERK_SECRET_KEY == ''
+        run: |
+          echo "::notice::Skipped — set the NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY repo secrets to build the app and run the browser specs."
+
+      - uses: oven-sh/setup-bun@v2
+        if: env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY != '' && env.CLERK_SECRET_KEY != ''
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        if: env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY != '' && env.CLERK_SECRET_KEY != ''
+        run: bun install --frozen-lockfile
+
+      # Not covered by `tsc --noEmit`: prerendering, route config and the
+      # `experimental.useTypeScriptCli` path (CLAUDE.md trap 8) only fail here.
+      - name: Build
+        if: env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY != '' && env.CLERK_SECRET_KEY != ''
+        run: bun run build
+
+      - name: Install Chromium
+        if: env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY != '' && env.CLERK_SECRET_KEY != ''
+        run: bunx playwright install --with-deps chromium
+
+      # playwright.config.ts serves the build with `bun run start` under CI.
+      # The signed-in specs skip themselves without E2E_CLERK_*; the landing
+      # and axe specs run regardless.
+      - name: E2E and accessibility
+        if: env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY != '' && env.CLERK_SECRET_KEY != ''
+        run: bun run e2e
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

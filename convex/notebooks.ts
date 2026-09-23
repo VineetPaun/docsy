@@ -1,5 +1,10 @@
 import { ConvexError, v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import {
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+} from "./_generated/server";
 import { getUser, requireOwnedNotebook, requireUser } from "./lib/auth";
 import { purgeNotebook } from "./lib/cascade";
 
@@ -90,9 +95,10 @@ export const updateNotebook = mutation({
     title: v.optional(v.string()),
     description: v.optional(v.string()),
     // No canvas args: the editor was removed in 4d9decb, so nothing writes
-    // canvasContent / canvasHtml any more. The schema keeps the fields as
-    // optional because dropping a field whose rows still carry a value fails
-    // the Convex push — that needs a data migration first (AUDIT.md §4.11).
+    // canvasContent / canvasHtml any more. The schema still declares them
+    // because a row that carries a field the schema has dropped fails the
+    // push — see clearCanvasFields at the bottom of this file, which is the
+    // migrate step of getting rid of them.
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
@@ -133,5 +139,89 @@ export const getNotebookCount = query({
       .collect();
 
     return notebooks.length;
+  },
+});
+
+/**
+ * Step 2 of dropping the dead canvas fields: clear them from every row.
+ *
+ * The canvas editor was removed in `4d9decb`. Nothing has written
+ * `canvasContent` / `canvasHtml` / `canvasLastEditedAt` since, but they cannot
+ * simply be deleted from the schema: Convex validates the rows at rest against
+ * the new schema on push, and a row still carrying a field the schema no
+ * longer declares fails the whole push. Widen, migrate, narrow — and the
+ * schema was already wide, so this is the migrate step.
+ *
+ * `internalMutation`, so no browser can reach it. Run it from the CLI:
+ *
+ *   bunx convex run notebooks:clearCanvasFields
+ *
+ * Re-run until it reports `cleared: 0`, then delete the three fields from
+ * `convex/schema.ts` and push. Delete this function once that push lands.
+ *
+ * ponytail: a bounded batch, not `@convex-dev/migrations`. A whole component
+ * to drop three fields off a table capped at 25 rows per account is more
+ * moving parts than the problem has. The ceiling is that the scan reads the
+ * `notebooks` table looking for matches, so this stops being the right tool
+ * somewhere in the tens of thousands of rows — use the component then.
+ */
+const CANVAS_BATCH = 200;
+
+export const clearCanvasFields = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    // `filter`, not an index: there is no index on a field that is about to
+    // stop existing, and adding one to delete it is backwards.
+    const dirty = await ctx.db
+      .query("notebooks")
+      .filter((q) =>
+        q.or(
+          q.neq(q.field("canvasContent"), undefined),
+          q.neq(q.field("canvasHtml"), undefined),
+          q.neq(q.field("canvasLastEditedAt"), undefined)
+        )
+      )
+      .take(CANVAS_BATCH);
+
+    for (const notebook of dirty) {
+      // `undefined` removes the field rather than storing a null.
+      await ctx.db.patch(notebook._id, {
+        canvasContent: undefined,
+        canvasHtml: undefined,
+        canvasLastEditedAt: undefined,
+      });
+    }
+
+    return {
+      cleared: dirty.length,
+      // A full batch means there may be more; run it again.
+      done: dirty.length < CANVAS_BATCH,
+    };
+  },
+});
+
+/**
+ * Is it safe to drop the canvas fields from the schema yet?
+ *
+ *   bunx convex run notebooks:canvasFieldsRemaining
+ *
+ * `{ remaining: 0 }` means the narrowing push will validate. Anything else
+ * means run `clearCanvasFields` again first.
+ */
+export const canvasFieldsRemaining = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const dirty = await ctx.db
+      .query("notebooks")
+      .filter((q) =>
+        q.or(
+          q.neq(q.field("canvasContent"), undefined),
+          q.neq(q.field("canvasHtml"), undefined),
+          q.neq(q.field("canvasLastEditedAt"), undefined)
+        )
+      )
+      .take(CANVAS_BATCH);
+
+    return { remaining: dirty.length, atLeast: dirty.length === CANVAS_BATCH };
   },
 });

@@ -15,6 +15,7 @@ import {
   extractTextFromFile,
   indexDocument,
   isAcceptedFile,
+  storeSourceText,
 } from "@/lib/source-upload";
 
 export function DocumentDropzone() {
@@ -72,11 +73,14 @@ export function DocumentDropzone() {
       const { storageId } = await result.json();
 
       // 4. Create Document Record
+      // Full text to storage, snippet to the row (AUDIT.md §8).
+      const text = await storeSourceText(generateUploadUrl, content);
+
       const docId = await createDocument({
         notebookId,
         name: file.name,
         type: documentTypeFor(file),
-        content,
+        ...text,
         storageId,
       });
 

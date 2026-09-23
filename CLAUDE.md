@@ -16,7 +16,7 @@ ALWAYS use frontend skill while creating/editing frontend and check for responsi
 
 **ALWAYS build UI from shadcn components.** Check `components/ui/` first, then the shadcn registry — pull it in with the CLI (`bunx shadcn@latest add <name>`). Only hand-write a component when shadcn genuinely has no equivalent, and say so when you do. Never re-implement a dialog, dropdown, tooltip, table, or form control that shadcn already ships.
 
-**When a documented issue is fully fixed, delete the point from the markdown file** — `AUDIT.md`, `ROADMAP.md`, or any other doc. No ✅ markers, no strikethrough, no "DONE" rows; the entry is simply removed. If a finding is only partly resolved, rewrite it to describe only the work that remains. Keep section numbers stable (never renumber — gaps mean something was closed), and add one line to the changelog at the top of `AUDIT.md` so nobody re-audits it as a fresh finding.
+**When a documented issue is fully fixed, delete the point from the markdown file** — `TODO.md`, `SECURITY.md`, or any other doc. No ✅ markers, no strikethrough, no "DONE" rows; the entry is simply removed. If a finding is only partly resolved, rewrite it to describe only the work that remains. Keep section numbers stable (never renumber — gaps mean something was closed).
 
 Don't ever start the server or browser to verify changes after completion, as it's likely running.
 Also don't run typescript checks unless asked to do so.
@@ -37,13 +37,24 @@ bun dev              # terminal 2 — Next.js on :3000
 bunx tsc --noEmit    # typecheck (TypeScript 7 native compiler)
 bun run lint         # ⚠️ CURRENTLY CRASHES — see trap #8
 bun run eval <id>    # retrieval eval against eval/questions.json (AUDIT §7)
+bun run test:convex  # vitest — registered Convex functions (see below)
 bun run format       # prettier — CI checks this
-bun run e2e          # Playwright; needs a booted app, not wired into CI
+bun run e2e          # Playwright + the axe pass; needs a booted app
 ```
 
-CI (`.github/workflows/ci.yml`) runs `tsc --noEmit`, `eslint` and `bun test` on push and PR — not `next build`, which needs a real Clerk key. **The `eslint` step is red on every push** until trap #8 is resolved; `tsc` and `bun test` are the signal.
+CI (`.github/workflows/ci.yml`) runs `tsc --noEmit`, `eslint`, `bun test` and `bun run test:convex` on push and PR — not `next build`, which needs a real Clerk key. **The `eslint` step is red on every push** until trap #8 is resolved; the rest are the signal.
 
-`bun test` runs the eleven test files that exist (`lib/qdrant.test.ts` — page-number attribution + retrieval breadth; `lib/file-type.test.ts` — magic-byte sniffing; `lib/rate-limit.test.ts` — fixed-window maths; `lib/embeddings.test.ts` — retry predicate; `lib/openrouter.test.ts` — catalogue filter + provider derivation; `lib/tts-chunks.test.ts` — narration splitting; `lib/env.test.ts` — the boot-required env check; `lib/prompt-guard.test.ts` — a document cannot escape the source fence; `lib/quota.test.ts` — the storage ceiling; `lib/concurrency.test.ts` — the upload pool; `lib/query-rewrite.test.ts` — when a follow-up gets rewritten). Every one covers a _pure function_: nothing tests a route handler or a Convex function, so passing tests are never evidence a feature works end-to-end.
+**There are two test runners, and you need both.**
+
+`bun test` covers the pure helpers in `lib/` (chunking and page attribution, magic-byte sniffing, fixed-window maths, the embeddings retry predicate, the OpenRouter catalogue filter, narration splitting, the boot env check, the source fence, the storage ceiling, the upload pool, follow-up rewriting, the snippet/blob split) plus, in `tests/`, the cascade and **all nine route handlers** — `chat-route.test.ts` for the streaming one, `api-routes.test.ts` for the rest. Those assert the contract the wrapper owes a caller: 401 before the handler runs, 429 before the first paid call, 403 on a notebook you do not own, 400 on bad input, 503 naming the missing variable, and a generic 500 that leaks nothing.
+
+⚠️ **Writing a route test: spread the real module into every `mock.module`.** Bun replaces a module wholesale and the replacement outlives the file, so `mock.module("@/lib/convex-server", () => ({ requireNotebookOwner }))` deletes every other export — for every _later_ test file too. Write `({ ...convexServer, requireNotebookOwner })`. The symptom is `SyntaxError: Export named 'x' not found`, in a file that passes when run alone.
+
+`bun run test:convex` runs **vitest**, for the registered Convex functions in `tests/convex/*.vitest.ts` — ownership on every read and write, the notebook and source caps, the storage quota, the rate limiter, webhook replay and account deletion. A second runner is unavoidable: `convex-test` needs a Vite module graph (`import.meta.glob`) and an edge-runtime VM, neither of which `bun test` provides. Specs are named `*.vitest.ts` precisely so `bun test`, which claims `*.test.ts` anywhere in the tree, does not try to run them. Neither runner needs a deployment — the schema and `convex/_generated` are committed.
+
+`bun run e2e` is the browser layer: the landing specs and an `axe` WCAG A/AA pass over the landing page run against nothing but a booted app; the dashboard, notebook and signed-in accessibility specs skip themselves unless `E2E_CLERK_EMAIL` / `E2E_CLERK_PASSWORD` are set. Every spec runs twice, desktop and iPhone width. CI's `browser` job builds the app and runs all of this, but **only when the `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` repo secrets exist** — without them every step reports skipped with a notice rather than failing.
+
+Still untested end-to-end: the AI paths. A green suite says the guards hold, not that retrieval retrieves.
 
 ## ⚠️ Read before writing code
 
@@ -51,15 +62,22 @@ These are the traps that cause agents to do the wrong thing here.
 
 **1. Convex auth: never take a user id as an argument.** Identity comes from the verified Clerk JWT, via the helpers in `convex/lib/auth.ts` — `getUser(ctx)` in queries (returns null when anonymous), `requireUser(ctx)` in mutations (throws), plus `requireOwnedNotebook` / `requireOwnedDocument` for ownership. Convex functions are public HTTP endpoints, so a client-supplied `clerkId` lets any caller be any user; that was this repo's worst bug and it is fixed — don't reintroduce it.
 
-⚠️ **The whole thing hangs on `CLERK_JWT_ISSUER_DOMAIN` being set on the _Convex deployment_** (`bunx convex env set …`, not `.env.local`). Missing → `ctx.auth.getUserIdentity()` is null for every request → every query returns empty and every mutation throws `Unauthenticated`. If the app looks logged-out while Clerk clearly has a session, check that first. `AUDIT.md` §3.1.
+⚠️ **The whole thing hangs on `CLERK_JWT_ISSUER_DOMAIN` being set on the _Convex deployment_** (`bunx convex env set …`, not `.env.local`). Missing → `ctx.auth.getUserIdentity()` is null for every request → every query returns empty and every mutation throws `Unauthenticated`. If the app looks logged-out while Clerk clearly has a session, check that first.
 
-**2. Missing env vars fail quietly, in different ways.** `/api/chat`, `/api/web-search` and `/api/research` now return **503 naming the variable** — the fabricated "demo" responses are gone. `/api/chat` joined them — no `QDRANT_URL` or embeddings key is a 503 too, since the raw-text fallback that covered for them is gone, so **chat does not work at all without a live Qdrant**. One still degrades silently: no `ELEVENLABS_API_KEY` gives a script with no audio. Copy `.env.example` → `.env.local`; it lists every var and what breaks without it. `AUDIT.md` §0.5 records where each one is read.
+**2. Missing env vars fail quietly, in different ways.** `/api/chat`, `/api/web-search` and `/api/research` now return **503 naming the variable** — the fabricated "demo" responses are gone. `/api/chat` joined them — no `QDRANT_URL` or embeddings key is a 503 too, since the raw-text fallback that covered for them is gone, so **chat does not work at all without a live Qdrant**. One still degrades silently: no `ELEVENLABS_API_KEY` gives a script with no audio. Copy `.env.example` → `.env.local`; it lists every var and what breaks without it.
 
 **3. `proxy.ts` is the middleware.** Next 16 renamed `middleware.ts` → `proxy.ts`. Don't create `middleware.ts`; it won't run. It now protects every route except the landing page and the Clerk auth pages, and returns a JSON 401 (not a redirect) for `/api/*`.
 
 **4. `convex/_generated/` is generated output.** Committed, but never hand-edit. If `api.*` types look wrong, run `bunx convex dev` to regenerate.
 
-**5. `canvasContent` / `canvasHtml` are dead but not safely deletable.** The canvas editor was removed in `4d9decb`; the fields survive in `convex/schema.ts` and `updateNotebook`. Removing them is _not_ a one-liner — dropping a field from the Convex schema fails the push if any existing row still has it set, so it needs a data migration first.
+**5. The dead canvas fields are mid-migration — finish it, don't shortcut it.** The canvas editor was removed in `4d9decb`; `canvasContent` / `canvasHtml` / `canvasLastEditedAt` still sit in `convex/schema.ts`. Deleting those three lines fails the push while any row still carries the field — Convex validates the rows at rest against the new schema. The migrate step is written (`internal.notebooks.clearCanvasFields`); what remains is to run it and then narrow:
+
+```bash
+bunx convex run notebooks:clearCanvasFields      # repeat until cleared: 0
+bunx convex run notebooks:canvasFieldsRemaining  # expect { remaining: 0 }
+```
+
+Then delete the three fields from `convex/schema.ts`, push, and delete both functions. Until that lands, don't touch the fields.
 
 **5b. Every API route must authenticate — and authorize.** New routes start with `requireApiAuth()` from `lib/api-auth.ts`. A session only proves the caller is _some_ user, so any route handed a `notebookId` / `documentId` from the request also calls `requireNotebookOwner()` / `requireDocumentOwner()` from `lib/convex-server.ts`. Those fail **closed** — they need a Clerk JWT template named `convex`, and without it every guarded route 403s. They also read Convex, so a caller must delete vectors _before_ the Convex row, never after (see `app/notebook/[id]/page.tsx`). A route that spends money (LLM, TTS, web search) also calls `enforceRateLimit()` from `lib/rate-limit.ts` before the first paid call — and the budget name is all the caller passes; the numbers stay server-side in `convex/users.ts`, because an argument-supplied window is one a caller can reset. Also: any route that fetches a user-supplied URL goes through `safeFetchText()` / `assertPublicUrl()` from `lib/url-guard.ts`. Never call bare `fetch()` on a URL that came from a request body. If one route calls another server-to-server, forward the caller's `cookie` header (see `/api/research`) or the inner call 401s silently.
 
@@ -71,7 +89,7 @@ These are the traps that cause agents to do the wrong thing here.
 
 **5f. Storage is quota'd, and the counter is incremental.** `users.storageBytes` is maintained by `convex/lib/quota.ts`, not recomputed. Any new path that stores or rewrites source content must call `addStorageBytes` (and `assertStorageHeadroom` before writing), or the quota silently drifts. Size comes from `ctx.db.system.get(storageId)`, never from an argument — a client-declared size is a client-declared quota.
 
-**5e. Four env vars live on the Convex deployment, not in `.env.local`.** `CLERK_JWT_ISSUER_DOMAIN`, `CLERK_WEBHOOK_SECRET`, `QDRANT_URL`, `QDRANT_API_KEY` (`bunx convex env set …`). Each fails silently and differently — `AUDIT.md` §3.1 has the symptom table. The two that bite hardest: no registered Clerk webhook → **no `users` row is ever created, so every mutation throws "User not provisioned"**; no `QDRANT_URL` on Convex → deletes look fine but vectors survive and deleted docs return as ghost citations.
+**5e. Four env vars live on the Convex deployment, not in `.env.local`.** `CLERK_JWT_ISSUER_DOMAIN`, `CLERK_WEBHOOK_SECRET`, `QDRANT_URL`, `QDRANT_API_KEY` (`bunx convex env set …`). Each fails silently and differently. The two that bite hardest: no registered Clerk webhook → **no `users` row is ever created, so every mutation throws "User not provisioned"**; no `QDRANT_URL` on Convex → deletes look fine but vectors survive and deleted docs return as ghost citations.
 
 **6. `convex/` is fully typed now — keep it that way.** The `/* eslint-disable no-explicit-any */` headers and `ctx: any, args: any` annotations are gone; Convex infers both from the `args:` validators. Don't reintroduce `any` to silence an error.
 
@@ -118,6 +136,8 @@ convex/
                         (camelCase: Convex rejects hyphens in module paths)
   lib/quota.ts          storage accounting — every path that stores or frees
                         source content goes through here (trap 5f)
+  notebooks.ts          notebook CRUD + clearCanvasFields, the pending
+                        widen→migrate→narrow for the dead canvas fields (trap 5)
   *.ts                  schema + queries/mutations
 lib/
   api-auth.ts           requireApiAuth() — the 401 guard every route calls
@@ -173,19 +193,17 @@ lib/
 
 ## Before you claim something works
 
-- `bunx tsc --noEmit` clean and `bun test` green. `bun run lint` cannot pass right now (trap #8) — don't treat its crash as your regression, and don't count it as evidence either way
+- `bunx tsc --noEmit` clean, `bun test` green **and `bun run test:convex` green** — the second one is where the Convex mutations are covered. `bun run lint` cannot pass right now (trap #8) — don't treat its crash as your regression, and don't count it as evidence either way
 - If you touched retrieval, ingestion, or prompts, verify end-to-end with a real upload — unit-level correctness means little here, and AI failures are silent
 - Don't assert runtime behaviour you didn't execute. `node_modules` may not even be installed
 
 ## Further reading
 
-| Doc                      | Contents                                                                                                                                                                                                            |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [TODO.md](TODO.md)       | The active execution list — ordered tasks with acceptance criteria and open decisions. **Start here if you're here to do work.**                                                                                    |
-| [AUDIT.md](AUDIT.md)     | Full audit at commit `4d9decb`. §0 has orientation + env inventory + staleness check. Its changelog at the top records what has already been fixed and removed. §3 is critical security. §12 is the phased backlog. |
-| [ROADMAP.md](ROADMAP.md) | Post-remediation product strategy. Proposals, not defects — several mutually exclusive. Needs the §7 decisions answered by a human before implementing anything.                                                    |
-
-Both were written against `4d9decb`. If `git log --oneline 4d9decb..HEAD` shows commits, re-read cited lines before trusting either.
+| Doc                                | Contents                                                                                                                                                       |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [TODO.md](TODO.md)                 | The active execution list — ordered tasks with acceptance criteria and open decisions. **Start here if you're here to do work.**                               |
+| [SECURITY.md](SECURITY.md)         | The reporting channel, what is in scope, and the accepted security residuals with the file that implements each decision.                                      |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Local setup, the two non-negotiable rules (no user id as a Convex argument; every route through `withApiHandler`), and the docs-are-part-of-the-change policy. |
 
 <!-- convex-ai-start -->
 

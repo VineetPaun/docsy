@@ -9,7 +9,12 @@ export interface SourceDocument {
   _id: string;
   name: string;
   type: string;
+  /** Preview snippet, or the full text on rows written before AUDIT.md §8. */
   content?: string;
+  /** Storage id of the full extracted text, absent on those older rows. */
+  contentStorageId?: string;
+  /** Length of the full text, so the badge never fetches the blob to size it. */
+  contentLength?: number;
   storageId?: string;
   createdAt: number;
   /** "indexed" | "skipped" | "failed", absent on rows predating the field. */

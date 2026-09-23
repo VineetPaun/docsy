@@ -14,7 +14,7 @@ import { toast } from "sonner";
 import { api } from "@/convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { convexErrorMessage } from "@/lib/convex-error";
-import { indexDocument } from "@/lib/source-upload";
+import { indexDocument, storeSourceText } from "@/lib/source-upload";
 
 /** Only the fields the panel renders; providers return a good deal more. */
 interface WebResult {
@@ -31,6 +31,8 @@ export function WebSearchPanel({ notebookId }: { notebookId: string }) {
   const [showResults, setShowResults] = React.useState(false);
 
   const createDocument = useMutation(api.documents.createDocument);
+  // Needed to park the source's full text in storage rather than the row.
+  const generateUploadUrl = useMutation(api.documents.generateUploadUrl);
   const setIndexStatus = useMutation(api.documents.setIndexStatus);
 
   const handleSearch = async () => {
@@ -67,11 +69,15 @@ export function WebSearchPanel({ notebookId }: { notebookId: string }) {
     try {
       const content = `Source: ${result.url}\nTitle: ${result.title}\nDate: ${new Date().toISOString()}\n\n${result.snippet || ""}`;
 
+      // Same split as every other source, so one reader path covers them all
+      // (AUDIT.md §8). A snippet is usually all this text is anyway.
+      const stored = await storeSourceText(generateUploadUrl, content);
+
       const documentId = await createDocument({
         notebookId: notebookId as never,
         name: result.title || "Web Result",
         type: "txt",
-        content,
+        ...stored,
       });
 
       const status = await indexDocument({

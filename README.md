@@ -42,7 +42,7 @@ those features are unavailable — see `.env.example` for what breaks without wh
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/yourusername/docsy.git
+git clone https://github.com/VineetPaun/docsy.git
 cd docsy
 ```
 

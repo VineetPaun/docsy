@@ -100,3 +100,53 @@ export async function requireDocumentOwner(
 
   return document ? null : forbidden();
 }
+
+/**
+ * Every source in a notebook, with its **full** extracted text.
+ *
+ * The row only carries a snippet since the text moved into file storage
+ * (AUDIT.md §8), so anything that needs to read a source properly — the
+ * audio-overview script, for one — has to fetch the blob. Rows written before
+ * the split have no `contentStorageId` and their text is still inline, which
+ * is what the fallback covers.
+ *
+ * One client and one round of parallel fetches, not a client per document.
+ * Returns `[]` when the caller does not own the notebook, same as
+ * {@link notebookDocuments}.
+ */
+export async function notebookSourceTexts(
+  notebookId: string
+): Promise<{ name: string; content: string }[]> {
+  const client = await authedConvexClient();
+  if (!client) return [];
+
+  const documents = await client.query(api.documents.getDocuments, {
+    notebookId: notebookId as Id<"notebooks">,
+  });
+
+  return Promise.all(
+    documents.map(async (doc) => {
+      if (!doc.contentStorageId) {
+        return { name: doc.name, content: doc.content ?? "" };
+      }
+
+      // Signed URL rather than the blob itself: a Convex query cannot return
+      // file bytes.
+      const url = await client.query(api.documents.getContentUrl, {
+        documentId: doc._id,
+      });
+
+      if (!url) return { name: doc.name, content: doc.content ?? "" };
+
+      try {
+        const response = await fetch(url);
+        // The snippet is a worse narration than the full text but a much
+        // better one than nothing.
+        if (!response.ok) return { name: doc.name, content: doc.content ?? "" };
+        return { name: doc.name, content: await response.text() };
+      } catch {
+        return { name: doc.name, content: doc.content ?? "" };
+      }
+    })
+  );
+}

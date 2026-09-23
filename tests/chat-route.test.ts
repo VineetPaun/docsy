@@ -11,6 +11,17 @@
 
 import { afterEach, expect, mock, test } from "bun:test";
 
+// Spread into the doubles below. `mock.module` replaces a module wholesale and
+// the replacement outlives this file, so a double listing only the exports
+// this route uses breaks any *other* test file whose route imports the rest.
+import * as apiAuth from "../lib/api-auth";
+import * as convexServer from "../lib/convex-server";
+import * as embeddings from "../lib/embeddings";
+import * as openrouter from "../lib/openrouter";
+import * as qdrant from "../lib/qdrant";
+import * as queryRewrite from "../lib/query-rewrite";
+import * as rateLimit from "../lib/rate-limit";
+
 /** Reset the module registry between tests so each one installs its own doubles. */
 const loadRoute = async () => (await import("../app/api/chat/route")).POST;
 
@@ -39,14 +50,17 @@ function installMocks(
   } = {}
 ) {
   mock.module("@/lib/api-auth", () => ({
+    ...apiAuth,
     requireApiAuth: async () => ({ userId: "user_1", errorResponse: null }),
   }));
 
   mock.module("@/lib/rate-limit", () => ({
+    ...rateLimit,
     enforceRateLimit: async () => null,
   }));
 
   mock.module("@/lib/convex-server", () => ({
+    ...convexServer,
     requireNotebookOwner: async () => overrides.ownerResponse ?? null,
     notebookDocuments: async () => [
       { _id: "doc1", name: "Report.pdf", content: "costs are up" },
@@ -54,10 +68,12 @@ function installMocks(
   }));
 
   mock.module("@/lib/embeddings", () => ({
+    ...embeddings,
     generateEmbedding: async () => [0.1, 0.2, 0.3],
   }));
 
   mock.module("@/lib/qdrant", () => ({
+    ...qdrant,
     searchChunks:
       overrides.search ??
       (async () => [
@@ -75,6 +91,7 @@ function installMocks(
   }));
 
   mock.module("@/lib/openrouter", () => ({
+    ...openrouter,
     resolveModel: async () => "google/gemma-4-31b-it:free",
     modelContextLength: async () => 32_000,
     streamChatWithOpenRouter:
@@ -86,6 +103,7 @@ function installMocks(
   }));
 
   mock.module("@/lib/query-rewrite", () => ({
+    ...queryRewrite,
     rewriteQuery: async (question: string) => question,
   }));
 }

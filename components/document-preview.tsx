@@ -1,8 +1,11 @@
 "use client";
 
 import * as React from "react";
+import { useQuery } from "convex/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
+import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -18,9 +21,73 @@ interface Document {
   _id: string;
   name: string;
   type: string;
+  /** Preview snippet, or the full text on rows written before AUDIT.md §8. */
   content?: string;
+  /** Storage id of the full extracted text, absent on those older rows. */
+  contentStorageId?: string;
+  /** Length of the full text — what the footer reports. */
+  contentLength?: number;
   storageId?: string;
   createdAt: number;
+}
+
+/**
+ * The source's full text, fetched from Convex storage.
+ *
+ * The row only carries a snippet since the text moved out of it (AUDIT.md §8),
+ * and the citation highlight offsets index into the *full* text, so the dialog
+ * has to have all of it before it can highlight anything.
+ *
+ * Renders the snippet meanwhile, and keeps it if the fetch fails — a partial
+ * preview beats an empty one. Rows predating the split have no
+ * `contentStorageId`, the query returns null, and the snippet *is* the full
+ * text.
+ */
+function useFullText(document: Document | null): {
+  text: string;
+  isComplete: boolean;
+} {
+  const snippet = document?.content ?? "";
+
+  const url = useQuery(
+    api.documents.getContentUrl,
+    document?.contentStorageId
+      ? { documentId: document._id as Id<"documents"> }
+      : "skip"
+  );
+
+  const [fetched, setFetched] = React.useState<{
+    documentId: string;
+    text: string;
+  } | null>(null);
+
+  React.useEffect(() => {
+    if (!url || !document) return;
+
+    let cancelled = false;
+    const documentId = document._id;
+
+    fetch(url)
+      .then((response) => (response.ok ? response.text() : null))
+      .then((text) => {
+        if (!cancelled && text !== null) setFetched({ documentId, text });
+      })
+      .catch(() => {
+        // Snippet stays on screen; nothing else to do from here.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [url, document]);
+
+  // Guarded by id: reopening the dialog on a different source must not show
+  // the previous one's text while the new fetch is in flight.
+  if (fetched && document && fetched.documentId === document._id) {
+    return { text: fetched.text, isComplete: true };
+  }
+
+  return { text: snippet, isComplete: !document?.contentStorageId };
 }
 
 export interface HighlightRange {
@@ -41,6 +108,7 @@ export function DocumentPreview({
   highlightRange,
 }: DocumentPreviewProps) {
   const highlightRef = React.useRef<HTMLElement>(null);
+  const { text, isComplete } = useFullText(document);
 
   // Scroll to highlight when it changes
   React.useEffect(() => {
@@ -53,7 +121,7 @@ export function DocumentPreview({
         });
       }, 100);
     }
-  }, [highlightRange, document]);
+  }, [highlightRange, document, text]);
 
   if (!document) return null;
 
@@ -153,12 +221,15 @@ export function DocumentPreview({
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6">
-          {document.content ? (
+          {text ? (
             <div className="prose prose-sm dark:prose-invert max-w-none">
               <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
-                {highlightRange ? (
+                {/* Only highlight once the whole text is here: the offsets
+                    index into it, so applying them to the snippet would mark
+                    the wrong passage. */}
+                {highlightRange && isComplete ? (
                   <>
-                    {document.content.slice(0, highlightRange.startChar)}
+                    {text.slice(0, highlightRange.startChar)}
                     <mark
                       ref={highlightRef}
                       className="bg-yellow-200 dark:bg-yellow-800/60 px-0.5 rounded animate-pulse"
@@ -167,17 +238,25 @@ export function DocumentPreview({
                         animationIterationCount: 3,
                       }}
                     >
-                      {document.content.slice(
+                      {text.slice(
                         highlightRange.startChar,
                         highlightRange.endChar
                       )}
                     </mark>
-                    {document.content.slice(highlightRange.endChar)}
+                    {text.slice(highlightRange.endChar)}
                   </>
                 ) : (
-                  document.content
+                  text
                 )}
               </pre>
+              {!isComplete && (
+                <p
+                  className="mt-4 text-xs text-muted-foreground"
+                  aria-live="polite"
+                >
+                  Loading the rest of this source…
+                </p>
+              )}
             </div>
           ) : (
             <div className="flex h-full flex-col items-center justify-center text-center">
@@ -211,8 +290,10 @@ export function DocumentPreview({
         {/* Footer */}
         <DialogFooter className="flex-row items-center justify-between border-t border-border/40 px-4 py-3 sm:px-6">
           <p className="text-xs text-muted-foreground">
-            {document.content
-              ? `${document.content.length.toLocaleString()} characters`
+            {/* The row's own count, so the footer is right before the blob
+                arrives and on rows that never had one. */}
+            {(document.contentLength ?? text.length)
+              ? `${(document.contentLength ?? text.length).toLocaleString()} characters`
               : "No content"}
           </p>
           <DialogClose asChild>

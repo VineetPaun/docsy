@@ -102,6 +102,17 @@ test("a document with no recorded size does not hand back free storage", async (
   expect(user.storageBytes).toBe(1_000);
 });
 
+test("deleting a source also frees the blob holding its text", async () => {
+  // The extracted text is a second stored file since it moved out of the row
+  // (AUDIT.md §8). Forget it and every delete leaks the larger of the two.
+  const { ctx, filesDeleted } = fakeCtx();
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await purgeDocument(ctx as any, doc({ contentStorageId: "text1" }) as any);
+
+  expect(filesDeleted).toEqual(["file1", "text1"]);
+});
+
 test("a source with no stored file still deletes cleanly", async () => {
   // URL and YouTube sources have no storage id; an unguarded delete would throw
   // and roll back the whole mutation, making the row undeletable.

@@ -41,7 +41,19 @@ export default defineSchema({
     name: v.string(),
     type: v.string(), // pdf, docx, txt, etc.
     storageId: v.optional(v.string()),
-    content: v.optional(v.string()), // extracted text content
+    // Preview snippet only — the first SNIPPET_CHARS of the extracted text.
+    // The full text lives in Convex file storage under `contentStorageId`,
+    // because a Convex document is capped at 1 MB and a long PDF's text blows
+    // through that on its own (AUDIT.md §8).
+    // ⚠️ Rows created before the split still hold their FULL text here and
+    // have no `contentStorageId`. Every reader must fall back to this field.
+    content: v.optional(v.string()),
+    // Storage id of the full extracted text, written as a blob by the client
+    // before `createDocument` — Convex mutations cannot write to storage.
+    contentStorageId: v.optional(v.string()),
+    // Character count of the FULL text, so the list badge and the quota never
+    // have to fetch the blob to know how big a source is.
+    contentLength: v.optional(v.number()),
     createdAt: v.number(),
     // New fields for URL/YouTube sources
     sourceType: v.optional(v.string()), // "file" | "url" | "youtube"
